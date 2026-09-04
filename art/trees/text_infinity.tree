@@ -6,6 +6,7 @@
      xm == 1, rows ym 7..11 (negative = blank cell); P glyph-row pattern (bit 2 =
      left pixel), shifted per glyph column; R glyph pixels; G and B are 0 deltas (RCT 3 adds R).
      S mask field (lemniscate) and L crossing field: a cell is drawn when |L| <= w near the centre or |S| <= half-width elsewhere.
+     
    Nodes: 321 */
 Width 2048
 Height 1024

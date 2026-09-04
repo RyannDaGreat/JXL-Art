@@ -182,3 +182,26 @@
   rebuilt from the old generator before noticing. Unique anchors now.
 - Verified mechanically (art/experiments/verify_equations.py): all 20 lines well formed.
 - equations 534 B, equations_crt 603 B.
+
+## 2026-09-04 08:00 — equations v2 (inline names, syntax colours) and a decoder-validity lesson
+- User: "use a dot not a *", "can we syntax-highlight it? can any way to make sin and tan inline
+  instead of the columnar thing? new version".
+- LESSON (cost me an hour): a tree with a split whose outcome is fixed by an ancestor split on
+  the same property encodes but does not decode. My new function-room threshold coincided with
+  the existing one in v1 (both 6 cells), nesting `x > 928` inside `x > 928`. Bisected by
+  toggling code paths; fixed generally with `simplify()` in the DSL.
+- MISTAKE: v2's token channel kept BLANK in the xm == 0 column, so inline word letters copied a
+  blank instead of the previous glyph ("S   "); the read-back verifier caught it. Copying W there
+  then leaked a 0 (= "(") along the top partial band; a y == 0 guard fixed that.
+- MISTAKE: the verifier thresholded luminance at 127 and read grey parentheses (120) as blank;
+  now max(R,G,B) > 60, and parens were brightened to (170,170,170).
+- Sizes: equations 559 B, equations_crt 630 B, equations_v2 671 B. Both verified.
+
+## 2026-09-04 08:40 — v2 gap, v3 one-per-line
+- User: "one equation per line in another forked version? and add some space between them in the
+  dense version". A line cannot span decoder groups (no state crosses the boundary), so v3 is
+  the single-group 1024x1024 canvas (30 lines of 64 tokens); v2 keeps two per row with a `gap`
+  of 4 blank cells at the end of each group.
+- MISTAKE: adding EXP made "E" the first glyph in v1's order, and the successor lookup treated a
+  blank neighbour (-1) like index 0, filling hanging rows with "X"; guarded with `prop > -1`.
+- Sizes: v2 675 B, v3 658 B, v1 561 B, crt 630 B. All verified.

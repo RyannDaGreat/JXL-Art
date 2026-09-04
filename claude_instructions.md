@@ -19,7 +19,10 @@ left to right. This is what the JXL Art community does; the web tool is https://
 4. `text_infinity` (v1) — the same text masked to an infinity symbol, whole characters only;
    `text_infinity_v2` — v1 with a green-amber CRT look (scanlines, phosphor glow).
 5. `equations` — lines of random well-formed equations with matched parentheses, function
-   names written downward; `equations_crt` — the same with the CRT look.
+   names written downward; `equations_crt` — the same with the CRT look; `equations_v2` —
+   names inline (SIN COS TAN EXP), syntax-coloured by token kind, two 60-token equations per
+   row with a 4-cell gap; `equations_v3` — the same on a 1024x1024 single-group canvas, one
+   64-token equation per line.
 
 **Hard constraints:** file size <= 1024 bytes (`anything above a kilobyte is banned`), image
 >= 1024x1024, the CA must drive the randomness, every result is visually verified by Claude
@@ -116,6 +119,12 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 > "is it possible to make a context-free grammar this way" ... "well, what we could do is each word
 > could be vertically rendered downward" ... "does that solve the problem" ... "i want a CFG cause i
 > wanna generate random equations" ... "with ( and )'s that match properly" ... "do it"
+
+> "use a dot not a *" ... "can we syntax-highlight it? can any way to make sin and tan inline instead
+> of the columnar thing? new version"
+
+> "can we have one equation per line in another forked version? and add some space between them in
+> the dense version"
 
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
@@ -275,22 +284,41 @@ Same text and mask as v1 plus two hidden channels and a colour rule (all in art/
   (user: "not smooth and seems to have added a lot of bytes"; it cost ~130 B). Smooth vignettes
   are not available: brightness can only take a few discrete leaf values per region.
 
-### equations — art/trees/equations.tree (534 B) and equations_crt.tree (603 B), `--equations [--crt]`
+### equations — equations.tree (561 B), equations_crt.tree (630 B), equations_v2.tree (675 B), equations_v3.tree (658 B)
+Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 4` (v2) and
+`--equations --inline --width 1024 --name equations_v3` (v3).
 A context-free grammar rendered as text. Matched parentheses of one kind are a one-counter
 language (Dyck-1), so no stack is needed: tokens are generated left to right, one per 16x32 cell,
 by a counter automaton whose whole state is one channel value `S = 8*class + depth` (classes
 OPEN, OP, FUNC, CLOSE, OPERAND, BLANK; depth 0..3). The class is a threshold band and every
 transition is `W + constant`, so the decision tree is not duplicated per depth (~45 nodes).
-Grammar: `E -> operand | ( E ) | fn ( E ) | E op E`, operands Y Z 1 2 3, operators + - * / ^
-(= only at depth 0), fn SIN COS TAN. `(` requires depth < 3 and at least depth+3 cells left,
-`)` requires depth > 0, and the last cells of a line force closes (`x` thresholds, each decoder
-group is a 64-cell line), so every line balances. Random choices use the 5-bit value V.
-Channels: cc, A (Rule 30), V, RT (row type 0/1/2, cycling per cell band), S, T (glyph index:
-picks the concrete glyph of the class, or in hanging rows the successor letter of the glyph
-above: S->I->N, C->O->S, T->A->N), P, R (+ sl, C with --crt). Not flipped: names hang downward
-and the first expression row is band 1 (y = 52), 59 CA steps below the seed.
-Verification: `python3.10 art/experiments/verify_equations.py` reads the glyphs back from the
-PNG and checks every line (20/20 well formed).
+Grammar: `E -> operand | ( E ) | fn ( E ) | E op E`, operands Y Z 1 2 3, operators + - · / ^
+(= only at depth 0; multiplication is a centred dot, user: "use a dot not a *"), fn SIN COS TAN
+EXP. `(` requires depth < 3 and room, `)` requires depth > 0, and the last cells of a line force
+closes (`x` thresholds, each decoder group is a 64-cell line), so every line balances. Random
+choices use the 5-bit value V. The first band is blank (too close to the seed row).
+- v1 (`equations`): classes OPEN OP FUNC CLOSE OPERAND BLANK; RT row type 0/1/2 cycles per cell
+  band; function names hang downward: the token channel in hanging rows copies the successor
+  letter of the glyph above (S->I->N etc.). Not flipped. 10 lines per group.
+- v2 (`equations_v2`, user: "sin and tan inline", "syntax-highlight"): classes OPEN OP FN1 FN2
+  FN3 CLOSE OPERAND BLANK; a name is three consecutive states and the token channel copies the
+  successor letter of the glyph to the LEFT (its xm == 0 column copies W for that; row 0 is
+  blank so the copy chains start blank). Every cell row is a line (30 per group). Colour:
+  channel K = 0 unlit else 1 + kind of the glyph (parens, operators, variables, digits,
+  functions; the glyph order keeps kinds contiguous so kind = thresholds on the token), and
+  R G B are five-entry palette lookups (EQ_PALETTE), no RCT. `gap` cells at the end of each
+  group stay blank (v2: 60-token equations, 4-cell gap between the two per row).
+- v3 (`equations_v3`, user: "one equation per line"): v2 on a 1024x1024 canvas. One decoder
+  group means one line per cell row; a line cannot span two groups because groups decode
+  independently and the depth counter cannot cross the boundary.
+Verification: `python3.10 art/experiments/verify_equations.py equations|equations_v2` reads the
+glyphs back from the PNG (max of R,G,B > 60 = lit) and checks every line: 20/20, 60/60, 30/30.
+
+### Decoder validity: no redundant splits
+libjxl validates trees on decode: a split on a property whose outcome is already fixed by an
+ancestor split on the same property (e.g. `x > 928` inside the else branch of `x > 928`) makes
+the file encode fine but FAIL TO DECODE ("Failed to decode image"). The DSL's `simplify()` pass
+removes such splits from every generated tree; hand-written trees must avoid them.
 
 ### Byte-cost model (measured)
 Baseline ~25 B; **each hidden channel costs 6 B of header**; repetitive trees cost ~1.2 B/node,
@@ -307,7 +335,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Seven `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 534 B, equations_crt 603 B; the last five at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Nine `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 559 B, equations_crt 630 B, equations_v2 675 B, equations_v3 658 B (1024x1024); six of them at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 
