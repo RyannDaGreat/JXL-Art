@@ -292,3 +292,14 @@
   below band 10 and the label above band 1 (in L, 2 y tests) instead of duplicating the pattern table.
 - Left half of the width was empty (proper divisors end at n / 2): moved the label to 510 and added the
   divisor-count bar chart, which also makes primes readable from afar.
+
+## 2026-09-04 14:40 — primes_wall
+- User asked for a densely packed wall of only the primes. Analysed at length: dense packing needs
+  a stall or queue fed back from the primality test into the divisor counters on the next pixel,
+  and a channel can only read its own neighbours and earlier channels at the same pixel, so it is
+  not expressible (PrevErr turned out to be the clamped-gradient error, not the leaf offset, so it
+  cannot smuggle a previous pixel's flag either). Built the closest honest piece: a dense grid of
+  all integers with primes bright and composites faint (902 B, 5000 numbers, verified 0 wrong).
+- Bugs on the way: Prev only reaches 19 channels back (channel order redesigned around it); the
+  "start counters at 1 - 2d so n = d is not a hit" trick breaks when column 0 jumps by 50 modularly
+  (the value never leaves the negative regime) — replaced by testing only 2, 3, 5, 7 for n <= 100.

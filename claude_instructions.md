@@ -161,6 +161,13 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 
 > "fork a subagent to do the prime thing"
 
+> "can we have another prime version that's a grid of numbers, just the primes, so it densely lists all primes
+> packing the whole image with a wall of prime numbers"
+
+> "also give the repo a good readme with the example pics + their filesizes. really teh readme is a gallery. u
+> can have tiny caption per image, saying why they're impressive in 20 words or 1 sentence per, whichever is
+> shortter. Push when done" ... "the readme doesnt need to be too verbose"
+
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
 installs that leave no trace in the dump. Top level therefore holds `setup.sh` next to the manifest.
@@ -422,6 +429,35 @@ art/experiments/verify_primes.py: reads the three digits, the label colour, the 
 sieve mark of all 170 bands against trial division (39 primes), 0 wrong; VLM: full render plus 4x crops
 of the sieve corner and of the labels/bars.
 
+### primes_wall — primes_wall.tree (902 B)
+Generate with `python3.10 art/gen_primes_wall.py` (its own generator, importing the DSL from
+gen_text_tree.py at the 1 px geometry). User: "can we have another prime version that's a grid of numbers,
+just the primes, so it densely lists all primes packing the whole image with a wall of prime numbers".
+What it is: 1024x1024, the integers 1 .. 5000 in a dense grid (50 per row, 100 rows of 10 px, 4 digit
+cells of 4 px plus a blank cell per number, right-aligned, leading zeros blank), primes in gold
+(255, 200, 60), composites faint (26, 26, 26) so the picture reads as a wall of primes on a dim
+numeric texture (COMPOSITE_COLOUR = black gives "just the primes" at their natural positions).
+WHY not a packed list of only primes: the decoder is causal in raster order and a channel can read
+only its own neighbours and earlier channels at the same pixel, so nothing downstream of the
+primality test (which needs all divisor counters) can feed back into those counters on the next
+pixel or row. Packing primes densely needs exactly that feedback (stall the candidate counter while a
+prime is being printed, or a queue), so it cannot be expressed; nor can a stored list of ~700 primes
+fit in 1 KB. A grid of consecutive integers needs no feedback: every number's cell is fixed.
+How: channel Q = 10 * (x mod 20) + ym (number-pixel counter); one counter channel per prime divisor
+2 .. 67 (all primes <= sqrt(5000)) holding n mod d: +1 at number starts (Q <= 9) along the row, +50
+(mod d) at band starts down column 0, 1 for n = 1; M = "some counter is 0" tested with one PrevAbs
+split per divisor on every pixel. The trivial hit n = d can only occur for n <= 100 (rows 0 and 1),
+where every composite has a factor 2, 3, 5 or 7, so those rows test only the four small counters and
+the cells 1 .. 7 are spelled out (1, 4, 6 composite). Digits o t h th: +1 with carries at number
+starts, where a value 10 .. 19 right after a step means "wrapped, carry out" (read by the next digit
+on the same pixel; holds normalise it), and +5 on the tens at row starts (PER_ROW = 50 keeps the
+row-start carry a single tens step). Z = index of the first non-zero digit (leading zeros blank), D =
+the digit of the current digit cell (one 10-leaf runs_tree per digit channel), P R G B as the text
+pieces (colour_channel `on` and RCT deltas chosen by M). Channel order matters: a channel can look
+back only 19 channels, so the 19 counters sit right after Q and M right after them, and a second
+cell counter serves the digit and glyph channels. Verified by art/experiments/verify_primes_wall.py:
+reads all 5000 numbers and their colour back, 669 primes, 0 wrong; VLM: full render and a crop.
+
 ### equations — equations.tree (556 B), equations_crt.tree (625 B), equations_v2.tree (705 B), equations_v3.tree (652 B), equations_v4.tree (840 B)
 Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 1 --random_length` (v2) and
 `--equations --inline --width 1024 --name equations_v3` (v3) and
@@ -506,7 +542,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Fourteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, quotes 996 B, primes 415 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Fifteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, quotes 996 B, primes 415 B, primes_wall 902 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 
