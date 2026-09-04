@@ -6,7 +6,7 @@
    Channels: c0 cc, c1 A, c2 V, c3 RT, c4 S, c5 T, c6 P, c7 K, c8 R, c9 G, c10 B
      cc cell counter; A Rule 30; V 5 random bits; S = 8*class + depth; T glyph index; P glyph-row pattern;
      K colour index (0 unlit, else 1 + kind); R G B palette lookups.
-   Nodes: 493 */
+   Nodes: 501 */
 Width 2048
 Height 1024
 
@@ -371,7 +371,11 @@ if c > 9
                                       if Prev2 > 21
                                         - W -9
                                         - W -40
-                                      - W -40
+                                      if x > 128
+                                        if Prev2 > 23
+                                          - Set 56
+                                          - W -40
+                                        - W -40
                                 if W > 39
                                   if x > 800
                                     if W > 40
@@ -385,7 +389,11 @@ if c > 9
                                         if Prev2 > 21
                                           - W -1
                                           - W -32
-                                        - W -32
+                                        if x > 128
+                                          if Prev2 > 23
+                                            - Set 56
+                                            - W -32
+                                          - W -32
                                   if W > 31
                                     - W -31
                                     if W > 23
@@ -437,10 +445,10 @@ if c > 9
                   if y > 0
                     if Prev3 > 0
                       - N 0
-                      if N > 1
+                      if N > 0
                         - Set 0
                         - N 1
-                    - Set 2
+                    - Set 1
                 if c > 1
                   if Prev2 > 63
                     - W 0

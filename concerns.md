@@ -215,3 +215,8 @@
 - User: "this is a wall of text i cant see where one equation starts and another ends i want more
   space between them". Rendered gap/row_gap variants (8/2, 12/2, 12/3; all 698 B since only
   thresholds change) and chose 12/2: two clear columns, 10 lines per group. 12/3 looked empty.
+
+## 2026-09-04 09:40 — random-length equations
+- User: "can we make the equations themself shorter, only 1 empty-space between lines", then
+  "actually, make the equations of random length". Added `random_length`: in expect_operator at
+  depth 0, past EQ_MIN_CELLS, V > EQ_END_V sends the state to BLANK. Row gap back to 1, gap 12.

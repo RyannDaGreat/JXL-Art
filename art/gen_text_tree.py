@@ -695,6 +695,8 @@ EQ_GLYPHS = "".join(EQ_KINDS.values())
 EQ_MAX_DEPTH = 3
 EQ_ROWS = 3                                  # v1: cell rows per expression (1 expression + 2 hanging)
 EQ_RT_INIT = 1                               # v1 row type before the first band: bands go 2, 0, 1, ...
+EQ_END_V = 23                                # random_length: V > 23 after a top-level operand ends the equation (1 in 4)
+EQ_MIN_CELLS = 8                             # random_length: no equation ends before this many tokens
 EQ_PALETTE = {"parens": (170, 170, 170), "operators": (255, 140, 50), "variables": (110, 190, 255),
               "digits": (200, 150, 255), "functions": (255, 220, 90)}   # v2 syntax colours on black
 
@@ -740,11 +742,12 @@ def eq_row_type(prev_cc, period=EQ_ROWS, init=EQ_RT_INIT):
     return If("x", 0, Leaf("W", 0), If("y", 0, If(prev_cc, 0, Leaf("N", 0), step), Set(init)))
 
 
-def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev_rt=None):
+def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev_rt=None, random_length=False):
     """
     Pure function. State channel S (see above), decided once per cell at xm == SAMPLE_X on
     `decide_row`, copied right (W) and down (N); reset at x == 0 (each decoder group is one
-    line) and blank above `first_line_y`. Random choices use the 5-bit value V.
+    line) and blank above `first_line_y`. Random choices use the 5-bit value V. With
+    `random_length` a top-level operand may end the equation once EQ_MIN_CELLS tokens are drawn.
 
     Examples:
         >>> render(eq_state("Prev", "Prev2", 11, 64, True, 52)).splitlines()[0]
@@ -766,9 +769,10 @@ def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev
     def expect_operator(b):
         to_close, to_op, to_blank = Leaf("W", base("CLOSE") - 1 - b), Leaf("W", base("OP") - b), Set(base("BLANK"))
         deep = lambda then, other: If("W", b, then, other)            # depth > 0
+        may_end = If("x", CELL_W * EQ_MIN_CELLS, If(prev_v, EQ_END_V, to_blank, to_op), to_op) if random_length else to_op
         return cells_left_le(2, deep(to_close, to_blank),
                              cells_left_le(EQ_MAX_DEPTH + 1, deep(to_close, to_op),
-                                           deep(If(prev_v, 21, to_close, to_op), to_op)))
+                                           deep(If(prev_v, 21, to_close, to_op), may_end)))
 
     cases = [(base("BLANK") - 1, Set(base("BLANK"))), (base("OPERAND") - 1, expect_operator(base("OPERAND"))),
              (base("CLOSE") - 1, expect_operator(base("CLOSE")))]
@@ -885,13 +889,14 @@ def kinds_order():
     return [ch for glyphs in EQ_KINDS.values() for ch in best_order(glyphs, dist)]
 
 
-def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0):
+def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0, random_length=False):
     """
     Pure function. (tree source, channel names, glyph order) for the random-equations piece.
     inline=True is v2: names written inline and syntax-coloured (no CRT variant). `gap` cells at
     the end of each decoder group stay blank (space between side-by-side equations). A
     1024-wide canvas is one group, i.e. one equation per line. `row_gap` blank cell rows are
-    left between equation rows (inline only; v1 already has its two hanging rows).
+    left between equation rows (inline only; v1 already has its two hanging rows). `random_length`
+    lets equations end early at random (see eq_state) instead of filling the line.
 
     Examples:
         >>> build_equations((2048, 1024))[1]
@@ -922,7 +927,7 @@ def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0
     elif spaced:
         trees["RT"] = eq_row_type(prev("RT", "cc"), period=row_gap + 1, init=row_gap)   # band 1 is an expression row
     trees["S"] = eq_state(prev("S", "V"), prev("S", "cc"), decide_row, line_cells, inline, first_line_y,
-                          prev("S", "RT") if spaced else None)
+                          prev("S", "RT") if spaced else None, random_length)
     trees["T"] = eq_token(order, prev("T", "S"), prev("T", "V"), prev("T", "cc"), decide_row, inline,
                           None if inline else prev("T", "RT"))
     trees["P"] = pattern_channel(order, prev("P", "T"), prev("P", "cc"), early=1 if crt else 0, flip=False)
@@ -1023,7 +1028,7 @@ HiddenChannel {len(names) - 3}
     return header + render(tree) + "\n", names, order
 
 
-def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0, row_gap=0):
+def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0, row_gap=0, random_length=False):
     """
     Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree / equations.tree);
     prints node count. Default canvas: 1024x1024 without a mask, 2048x1024 with one or for equations.
@@ -1033,13 +1038,13 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         >>> # generate(mask="lemniscate", name="text_infinity")  -> text_infinity.tree (2048x1024)
         >>> # generate(mask="lemniscate", crt=True, name="text_infinity_v2")   -> CRT look
         >>> # generate(equations=True)                                         -> equations.tree
-        >>> # generate(equations=True, inline=True, gap=4, row_gap=1)          -> equations_v2.tree (two per row, gaps)
+        >>> # generate(equations=True, inline=True, gap=12, row_gap=1, random_length=True)  -> equations_v2.tree (two per row)
         >>> # generate(equations=True, inline=True, width=1024, name="equations_v3")  -> one equation per line
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
     canvas = (width or (2 * GROUP if (mask or equations) else GROUP), height)
     if equations:
-        src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap)
+        src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap, random_length)
         default_name = "equations" + ("_v2" if inline else "_crt" if crt else "")
     else:
         src, names, order = build_piece(charset, mask, canvas, crt)
