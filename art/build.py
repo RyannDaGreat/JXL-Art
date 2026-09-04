@@ -18,6 +18,7 @@ ART_DIR = Path(__file__).resolve().parent
 TREE_DIR = ART_DIR / "trees"
 OUT_DIR = ART_DIR / "out"
 GOLF_LIMIT_BYTES = 1024
+LIMITS = {"primes_wall_4k": 2048}       # user: "2kb is acceptable for 16x" (the 4K prime wall)
 
 
 def compile_tree(tree_path, jxl_path, png_path):
@@ -48,9 +49,10 @@ def build(name=None, max_bytes=GOLF_LIMIT_BYTES):
     oversized = []
     for tree in trees:
         size = compile_tree(tree, OUT_DIR / f"{tree.stem}.jxl", OUT_DIR / f"{tree.stem}.png")
-        verdict = "OK" if size <= max_bytes else f"TOO BIG (> {max_bytes})"
+        limit = LIMITS.get(tree.stem, max_bytes)
+        verdict = "OK" if size <= limit else f"TOO BIG (> {limit})"
         print(f"{tree.stem}.jxl  {size} bytes  {verdict}")
-        if size > max_bytes:
+        if size > limit:
             oversized.append((tree.stem, size))
     assert not oversized, f"code-golf limit exceeded: {oversized}"
 

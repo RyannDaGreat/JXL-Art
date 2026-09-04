@@ -303,3 +303,14 @@
 - Bugs on the way: Prev only reaches 19 channels back (channel order redesigned around it); the
   "start counters at 1 - 2d so n = d is not a hit" trick breaks when column 0 jumps by 50 modularly
   (the value never leaves the negative regime) — replaced by testing only 2, 3, 5, 7 for n <= 100.
+
+## 2026-09-04 16:30 — primes_wall_v2 and primes_wall_4k
+- "16x more primes" is not reachable: divisors up to 283 (59 channels) cost ~2.4 KB. Built the largest
+  fits: v2 (6125 numbers, 994 B) and 4k (4096x2048, 33600 numbers, 1945 B under 2 KB).
+- Bugs: Prev reaches only 19 channels back (blocks with their own Q/E/M; later Qs read the previous Q;
+  the digits read the cell counter, which carries the countdown flag for multi-group walls); the group
+  countdown was off by one (G - 1 steps, so group 1 showed 1, 2, 3 .. with wrong colours — the user
+  spotted a bright 4 and 12); the first generalised layout cost +100 B on the original wall until
+  single-group walls went back to one 19-counter block with a y test instead of a region channel.
+- Edge bug: a partial extra number was drawn past the last full cell of each row (and duplicated the
+  next row's first number); D is now blank there and the verifier checks the edge. Sizes: {'primes_wall': 959, 'primes_wall_v2': 1013, 'primes_wall_4k': 1918}.

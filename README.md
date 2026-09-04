@@ -1,6 +1,6 @@
 # JXL Art
 
-Each picture is a `.jxl` file of at most 1024 bytes. The file holds no pixels, only a JPEG XL decision tree;
+Each picture is a `.jxl` file of at most 1024 bytes (the 4K prime wall is allowed 2 KB). The file holds no pixels, only a JPEG XL decision tree;
 the decoder's predictors act as a cellular automaton and compute the image. Sizes are the `.jxl` bytes.
 
 ### digits — 177 B
@@ -87,11 +87,23 @@ One equation per line on a single 1024 px decoder group.
 
 A sieve of Eratosthenes: divisor counters mark composites, labels coloured by primality, divisor bars.
 
-### primes_wall — 902 B
+### primes_wall — 959 B
 
 ![primes_wall](art/out/primes_wall.png)
 
 The integers 1 to 5000 with the 669 primes lit; primality computed by 19 divisor counters.
+
+### primes_wall_v2 — 1013 B
+
+![primes_wall_v2](art/out/primes_wall_v2.png)
+
+Tighter rows: 6,125 numbers and 798 primes, still under a kilobyte.
+
+### primes_wall_4k — 1918 B (2 KB budget)
+
+![primes_wall_4k](art/out/primes_wall_4k.png)
+
+4096x2048, 33,600 numbers and 3,598 primes; 42 divisor counters seeded per decoder group.
 
 ## Build
 

@@ -429,7 +429,7 @@ art/experiments/verify_primes.py: reads the three digits, the label colour, the 
 sieve mark of all 170 bands against trial division (39 primes), 0 wrong; VLM: full render plus 4x crops
 of the sieve corner and of the labels/bars.
 
-### primes_wall — primes_wall.tree (902 B)
+### primes_wall — primes_wall.tree (959 B), primes_wall_v2.tree (1013 B), primes_wall_4k.tree (1918 B)
 Generate with `python3.10 art/gen_primes_wall.py` (its own generator, importing the DSL from
 gen_text_tree.py at the 1 px geometry). User: "can we have another prime version that's a grid of numbers,
 just the primes, so it densely lists all primes packing the whole image with a wall of prime numbers".
@@ -457,6 +457,20 @@ pieces (colour_channel `on` and RCT deltas chosen by M). Channel order matters: 
 back only 19 channels, so the 19 counters sit right after Q and M right after them, and a second
 cell counter serves the digit and glyph channels. Verified by art/experiments/verify_primes_wall.py:
 reads all 5000 numbers and their colour back, 669 primes, 0 wrong; VLM: full render and a crop.
+User then: "can we have 16x more primes make it 4k?" -> "1.5x it is then, 2kb is acceptagble for 16x" ...
+"this is new version btw" (keep the original). The generator became preset-driven (WALLS): `--wall primes_wall_v2`
+= 1024x1024, 8 px rows, 49 per row: 6125 numbers, 21 divisors (2 .. 73), 994 B, 798 primes;
+`--wall primes_wall_4k` = 4096x2048, 8 groups, 42 per group row, 5 digit cells (24 px numbers): 33600 numbers,
+42 divisors (2 .. 181), 1945 B under a 2048 B budget (art/build.py LIMITS), 3598 primes. 16x (80000
+numbers, 59 divisors) needs ~2.4 KB: each divisor costs ~35 B with the group logic, so 8 groups is the 2 KB size.
+Multi-group seeding: group G = g - 21 covers numbers [4200 G + 1, 4200 G + 4200]; the first Q's column-0 margin
+value is G + 1 at y == 0 counting down per row, so rows 1 .. G are "step rows" where every counter adds
+GROUP_SIZE mod d and every digit adds GROUP_SIZE's digit (with carries); later blocks' Q and the cell counter
+carry a 0/1 copy of that flag (a channel can only look back 19 channels, so the counters sit in blocks
+[Q, E, 16 counters, M] for several groups, [Q, 19 counters, M] for one group, each M also reading the
+previous block's M). The trivial-hit region (E: group 0, first small_rows rows) and the small divisor set are
+derived from the vocabulary of divisors. Verified by verify_primes_wall.py --wall <name>: 0 wrong for all
+three; VLM: full renders and crops.
 
 ### equations — equations.tree (556 B), equations_crt.tree (625 B), equations_v2.tree (705 B), equations_v3.tree (652 B), equations_v4.tree (840 B)
 Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 1 --random_length` (v2) and
@@ -542,7 +556,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Fifteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, quotes 996 B, primes 415 B, primes_wall 902 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Seventeen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, quotes 996 B, primes 415 B, primes_wall 959 B, primes_wall_v2 1013 B, primes_wall_4k 1918 B (4096x2048, 2 KB budget), equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes (primes_wall_4k <= 2048 by the user's later allowance), each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 
