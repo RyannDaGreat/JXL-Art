@@ -130,3 +130,15 @@
 - Font gained "," "{" "}"; CHARSET_32 = A-Z + "!?.,{}" (no digits now). Both pieces use it.
 - Sizes: text 346 B; text_infinity 440 B (32 glyphs) / 354 B (--charset16). VLM check: round
   overlapping loops, braces and commas legible, no blank glyphs.
+
+## 2026-09-04 04:00 — a real figure-eight
+- User: "an infinity symbol's derivitive in the middle should lok like an X ... it looks like 2
+  circles next to each other". Overlapping rings cross at 2*acos(d/r) ~ 32 degrees: a lens.
+- Mask replaced by a Gerono-type lemniscate band S = (|u|^p/a^(p-2) - u^2 + k v^2)/16, |S| <= eps.
+  Explored (montages): quartic eps 60k had thin tips and a knot 2x the stroke; bold cubic (p = 3)
+  closed the holes because its minimum is only 0.148 a^2 (quartic 0.25 a^2); p = 3.5 with
+  eps = 100k, a = 0.44 W, k = 1.4 gives open holes, tips ~3 chars, a clear 45-degree X.
+- Level-set bands cannot have uniform stroke: thickness = 2 eps / |grad S|, zero gradient at the
+  crossing. Bolder strokes make the knot *relatively* smaller (ratio ~ sqrt(a / stroke)).
+- Sizes: text_infinity 471 B (32 glyphs; the polynomial needs a chain per group, ~+30 B over
+  the ellipses), text 346 B. Removed the ellipse mask code (git history has it).

@@ -4,7 +4,7 @@ Generates the text pieces: a grid of pseudo-random characters from a tiny pixel 
 a Rule-30 cellular automaton, optionally masked to a shape (only whole characters are drawn).
 
     python3.10 art/gen_text_tree.py                                  # text.tree (32 glyphs, 1024x1024)
-    python3.10 art/gen_text_tree.py --mask ellipses --name text_infinity            # 2048x1024
+    python3.10 art/gen_text_tree.py --mask lemniscate --name text_infinity          # 2048x1024
 
 Trees are built from a tiny DSL (If / Leaf tuples rendered to jxl_from_tree syntax) so every
 repeated structure (counters, bit accumulation, run-length lookups) is one function.
@@ -420,25 +420,33 @@ def colour_channel(prev_pattern, prev_cc):
 
 # ---------------------------------------------------------------- mask (whole cells only)
 # A cell is blank unless a field S is inside a band at the cell's sample point. Channels cannot
-# be added, so S must be separable: S = f(x) + g(y) - mid with f = (|x - cx| - d)^2 / PIECE_X and
-# g = (y - cy)^2 / PIECE_Y (two elliptical rings, aspect sqrt(PIECE_Y / PIECE_X)); "mid" centres
-# the band so membership is one |S| <= half-width test via the PrevAbs property. Predictors are
-# linear, so f and g are grown by chord slopes over pieces of PIECE px aligned to the centres:
-# with scale = piece the slopes are the small odd integers 1, 3, 5, ... and the accumulated value
-# is exact at every breakpoint (the curve deviates from the ellipse by < 10 px between them).
-ELLIPSES = dict(offset=0.244, r_in=0.1416, r_out=0.254, piece_x=192, piece_y=128)   # radii as fractions of width
+# be added, so S must be separable: Gerono's figure-eight y^2 = x^2 - x^4/a^2 is, and so are
+# its cousins y^2 = x^2 - |x|^p/a^(p-2). Lower p thickens the tips (the quartic's tips are half
+# as thick as its tops) but shallows the lobes' minimum so the holes close; p = 3.5 balances:
+#   S = (|u|^p / a^(p-2) - u^2 + k v^2) / SCALE,  u = x - cx, v = y - cy,  p = power
+# and the band -eps_in < S <= eps_out is a thick lemniscate that crosses itself at 45 degrees
+# (a level-set band bulges at the crossing, where the gradient vanishes: the knot is ~1.3x the
+# stroke for bold strokes, worse for thin ones). Centring the band makes membership one
+# |S| <= half-width test via PrevAbs.
+# Predictors are linear, so the polynomials are grown by rounded chord slopes over PIECE-px
+# pieces aligned to the centre; the value is exact at breakpoints and off by a few px between.
+LEMNISCATE = dict(power=3.5, a=0.44, k=1.4, eps_in=100000, eps_out=100000, scale=16, piece_x=128, piece_y=128)
+# a: lobe tips at cx +- a*W; k: vertical squash; eps in px^2 units (stroke ~ 2 eps / |grad S|)
 
 
-def ellipse_geometry(canvas):
+def lemniscate_geometry(canvas):
     """
-    Pure function. (cx, cy, d, r_in, r_out) in pixels for a canvas.
+    Pure function. (cx, cy, a, k, mid, half_width) in field units for a canvas.
 
     Examples:
-        >>> ellipse_geometry((2048, 1024))
-        (1024, 512, 500, 290, 520)
+        >>> lemniscate_geometry((2048, 1024))[:3]
+        (1024, 512, 901)
     """
     w, h = canvas
-    return w // 2, h // 2, round(ELLIPSES["offset"] * w), round(ELLIPSES["r_in"] * w), round(ELLIPSES["r_out"] * w)
+    sc = LEMNISCATE["scale"]
+    mid = (LEMNISCATE["eps_out"] - LEMNISCATE["eps_in"]) / (2 * sc)
+    half_width = (LEMNISCATE["eps_out"] + LEMNISCATE["eps_in"]) // (2 * sc)
+    return w // 2, h // 2, round(LEMNISCATE["a"] * w), LEMNISCATE["k"], mid, half_width
 
 
 def chord_pieces(profile, breakpoints, size):
@@ -467,46 +475,44 @@ def piece_chain(prop, pred, pieces):
     return chain(prop, [(split, Leaf(pred, slope)) for split, slope in reversed(pieces[1:])], Leaf(pred, pieces[0][1]))
 
 
-def ellipse_field(canvas):
+def lemniscate_field(canvas):
     """
-    Pure function. Field channel S for the ellipse mask; with two groups each group holds one
-    loop (centre at local x = GROUP - d on the left, x = d on the right).
+    Pure function. Field channel S for the lemniscate mask; with two groups the crossing sits on
+    the group boundary, so the left group holds u in [-1024, 0) and the right one u in [0, 1024).
 
     Examples:
-        >>> render(ellipse_field((1024, 1024))).splitlines()[0]
+        >>> render(lemniscate_field((1024, 1024))).splitlines()[0]
         'if x > 0'
     """
-    cx, cy, d, r_in, r_out = ellipse_geometry(canvas)
-    px, py = ELLIPSES["piece_x"], ELLIPSES["piece_y"]
-    mid = (r_in ** 2 + r_out ** 2) // (2 * px)
-    g = lambda v: (v - cy) ** 2 / py
-    ys = piece_chain("y", "N", chord_pieces(g, [cy + k * py for k in range(-8, 9)], canvas[1]))
+    cx, cy, a, k, mid, _ = lemniscate_geometry(canvas)
+    sc, px, py = LEMNISCATE["scale"], LEMNISCATE["piece_x"], LEMNISCATE["piece_y"]
+    pw = LEMNISCATE["power"]
+    f = lambda u: (abs(u) ** pw / a ** (pw - 2) - u ** 2) / sc
+    g = lambda v: k * v ** 2 / sc
+    ys = piece_chain("y", "N", chord_pieces(lambda y: g(y - cy), [cy + j * py for j in range(-8, 9)], canvas[1]))
 
-    def loop(centre, size):        # one loop centred at `centre` in local coordinates
-        f = lambda t: (t - centre) ** 2 / px
-        xs = piece_chain("x", "W", chord_pieces(f, [centre + k * px for k in range(-8, 9)], size))
-        return xs, Set(round(f(0) + g(0)) - mid)
+    def half(centre, size):        # chain over local x in [0, size) with u = x - centre
+        fx = lambda x: f(x - centre)
+        xs = piece_chain("x", "W", chord_pieces(fx, [centre + j * px for j in range(-16, 17)], size))
+        return xs, Set(round(fx(0) + g(-cy) - mid))
 
     if canvas[0] > GROUP:
-        (xs_l, base_l), (xs_r, base_r) = loop(GROUP - d, GROUP), loop(d, canvas[0] - GROUP)
+        (xs_l, base_l), (xs_r, base_r) = half(GROUP, GROUP), half(0, canvas[0] - GROUP)
         xs, base = per_group(True, xs_l, xs_r), per_group(True, base_l, base_r)
     else:
-        f = lambda x: (abs(x - cx) - d) ** 2 / px
-        breaks = [cx] + [cx + s * d + k * px for s in (-1, 1) for k in range(-8, 9)]
-        xs, base = piece_chain("x", "W", chord_pieces(f, breaks, canvas[0])), Set(round(f(0) + g(0)) - mid)
+        xs, base = half(cx, canvas[0])
     return If("x", 0, xs, If("y", 0, ys, base))
 
 
-def ellipse_gate(canvas, prev_field):
+def lemniscate_gate(canvas, prev_field):
     """
     Pure function. gate(update) for value_channel: BLANK unless |S| <= half-width.
 
     Examples:
-        >>> render(ellipse_gate((2048, 1024), "Prev")(Set(1))).splitlines()[0]
-        'if PrevAbs > 485'
+        >>> render(lemniscate_gate((2048, 1024), "Prev")(Set(1))).splitlines()[0]
+        'if PrevAbs > 6250'
     """
-    _, _, _, r_in, r_out = ellipse_geometry(canvas)
-    half_width = (r_out ** 2 - r_in ** 2) // (2 * ELLIPSES["piece_x"])
+    half_width = lemniscate_geometry(canvas)[5]
     return lambda update: If(prev_field + "Abs", half_width, Set(BLANK), update)
 
 
@@ -525,7 +531,7 @@ def build_piece(charset, mask, canvas):
         '/* text.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.'
     """
     assert len(charset) & (len(charset) - 1) == 0 and " " not in charset, "power-of-two size, no blank"
-    assert mask in (None, "ellipses") and canvas[1] <= GROUP and canvas[0] <= 2 * GROUP
+    assert mask in (None, "lemniscate") and canvas[1] <= GROUP and canvas[0] <= 2 * GROUP
     bits = len(charset).bit_length() - 1
     sample_y0 = GLYPH_Y0 - bits
     two_groups = canvas[0] > GROUP
@@ -536,10 +542,10 @@ def build_piece(charset, mask, canvas):
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {}
     if mask:
-        trees["S"] = ellipse_field(canvas)
+        trees["S"] = lemniscate_field(canvas)
     trees["cc"] = cell_counter()
     trees["A"] = rule30(two_groups)
-    gate = ellipse_gate(canvas, prev("V", "S")) if mask else None
+    gate = lemniscate_gate(canvas, prev("V", "S")) if mask else None
     trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
     trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"))
     trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
@@ -572,7 +578,7 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024):
 
     Examples:
         >>> # generate()                                                       -> text.tree
-        >>> # generate(mask="ellipses", name="text_infinity")  -> text_infinity.tree (2048x1024)
+        >>> # generate(mask="lemniscate", name="text_infinity")  -> text_infinity.tree (2048x1024)
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
     canvas = (width or (2 * GROUP if mask else GROUP), height)
