@@ -1,0 +1,8 @@
+Width 2048 Height 256
+if c > 0
+  if x > 1500
+    - Set 255
+    - Set 0
+  if x > 0
+    - W +1
+    - Set 0

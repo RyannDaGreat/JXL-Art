@@ -1,0 +1,12 @@
+Width 2048 Height 2048
+if c > 1
+  if g > 23
+    - Set 255
+    - Set 0
+  if c > 0
+    if g > 22
+      - Set 255
+      - Set 0
+    if g > 21
+      - Set 255
+      - Set 0

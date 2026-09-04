@@ -1,0 +1,118 @@
+  /* digits.tree — 16x16 grid of seven-segment 1s and 0s chosen by a Rule-30 cellular automaton.
+   Channels (HiddenChannel 4 => c0..c3 are invisible state, c4..c6 are R,G,B):
+     c0 xm : x mod 64 (counter from W)
+     c1 ym : y mod 64 (counter from N)
+     c2 A  : Rule 30 (new = NW xor (N or NE)) with "on" = 100. Row 0 is a Weyl sequence
+             v = (v+37) mod 100, row 1 thresholds it at 49, rows >= 2 run the automaton.
+             Column 0 is a second Weyl sequence running downward: Rule 30 only moves
+             information rightward well, so a fixed left boundary makes the left columns
+             periodic (period 64 = cell size!); the boundary sequence injects entropy.
+             NW/NE are recovered from the NW-N and N-NE properties (thresholds at +-50).
+     c3 C  : per-cell bit = A sampled at (xm=8, ym=7), copied across the cell with W and
+             down with N
+     c4 R  : seven-segment glyph. Cell 64 px, glyph box xm 16..47, ym 8..55, stroke 6 px,
+             1 px gaps between segments. "0" = a b c d e f, "1" = b c.
+     c5,c6 : copy of R (white on black) */
+Width 1024
+Height 1024
+HiddenChannel 4
+
+if c > 4
+  if Prev > 0
+    - Set 255
+    - Set 0
+  if c > 3
+    /* R: Prev1 = C bit, Prev3 = ym, Prev4 = xm */
+    if Prev3 > 7
+      if Prev3 > 55
+        - Set 0
+        if Prev4 > 41
+          if Prev4 > 47
+            - Set 0
+            /* segments b (ym 9..30) and c (ym 33..54) */
+            if Prev3 > 32
+              if Prev3 > 54
+                - Set 0
+                - Set 255
+              if Prev3 > 30
+                - Set 0
+                if Prev3 > 8
+                  - Set 255
+                  - Set 0
+          if Prev > 0
+            - Set 0
+            if Prev4 > 22
+              if Prev4 > 40
+                - Set 0
+                /* segments a (ym 8..13) and d (ym 50..55) */
+                if Prev3 > 49
+                  - Set 255
+                  if Prev3 > 13
+                    - Set 0
+                    - Set 255
+              if Prev4 > 15
+                if Prev4 > 21
+                  - Set 0
+                  /* segments f (ym 9..30) and e (ym 33..54) */
+                  if Prev3 > 32
+                    if Prev3 > 54
+                      - Set 0
+                      - Set 255
+                    if Prev3 > 30
+                      - Set 0
+                      if Prev3 > 8
+                        - Set 255
+                        - Set 0
+                - Set 0
+      - Set 0
+    if c > 2
+      /* C: Prev1 = A, Prev2 = ym, Prev3 = xm */
+      if Prev3 > 8
+        - W 0
+        if Prev2 > 7
+          - N 0
+          if Prev2 > 6
+            if Prev3 > 7
+              if Prev > 49
+                - Set 1
+                - Set 0
+              - N 0
+            - N 0
+      if c > 1
+        /* A: Rule 30 from row 2 on; row 1 thresholds the Weyl row 0 */
+        if y > 1
+          if x > 0
+            if N > 49
+              if NW-N > -51
+                - Set 0
+                - Set 100
+              if NW-N > 49
+                if N-NE > -50
+                  - Set 100
+                  - Set 0
+                if N-NE > -50
+                  - Set 0
+                  - Set 100
+            if N > 62
+              - N -63
+              - N +37
+          if y > 0
+            if N > 511
+              - Set 100
+              - Set 0
+            if W > 390
+              - W -391
+              - W +633
+        if c > 0
+          /* ym */
+          if y > 0
+            if N > 62
+              - Set 0
+              - N +1
+            - Set 0
+          /* xm */
+          if x > 0
+            if W > 62
+              - Set 0
+              - W +1
+            - Set 0

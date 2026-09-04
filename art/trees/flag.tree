@@ -1,0 +1,126 @@
+/* flag.tree — United States flag, 1946x1024 (10:19), 13 stripes of 79 px, canton 780x553,
+   50 five-pointed stars on the official 6/5 staggered lattice (row pitch 55, column pitch 65).
+   Golfed rewrite of art/experiments/flag_v1.tree (261 B -> 223 B), same look.
+   Changes vs v1: star uses mirror symmetry |u| (u = xm - 65) so only 3 half-plane channels and
+   a 13-node test are needed; row parity lives inside the U counter (flips when ym wraps); the
+   region/K channels are folded into R and G,B derive from R by thresholds; all star tests are
+   "> 0" so split values repeat.
+   Channels (HiddenChannel 6 => c0..c5 state, c6..c8 = R,G,B):
+     c0 ys : y mod 158            c1 ym : (y + 27) mod 55
+     c2 U  : xm - 65 in -65..64, restarts at -65 (even star rows) or 0 (odd rows) at x = 0
+     c3 L2 = ym - 3|u|             pass (> 0) inside lines T-BL / T-BR
+     c4 L4 = 167 - 3|u| - 4ym      pass inside lines BL-R / BR-L (outer)
+     c5 L5 = 167 + 3|u| - 4ym      fails only in the bottom notch between the legs
+     star = (L4 & L2) | (L4 & !L2 & L1) | (!L4 & L1 & L2 & L5), with L1 = ym > 20 */
+Width 1946
+Height 1024
+HiddenChannel 6
+
+if c > 6
+  if c > 7
+    /* B from R (Prev2): white 255, red 52, blue 110 */
+    if Prev2 > 200
+      - Set 255
+      if Prev2 > 100
+        - Set 52
+        - Set 110
+    /* G from R: white 255, red 34, blue 59 */
+    if Prev > 200
+      - Set 255
+      if Prev > 100
+        - Set 34
+        - Set 59
+  if c > 5
+    /* R: Prev1=L5 Prev2=L4 Prev3=L2 Prev5=ym Prev6=ys */
+    if g > 21
+      if Prev6 > 78
+        - Set 255
+        - Set 178
+      if x > 779
+        if Prev6 > 78
+          - Set 255
+          - Set 178
+        if y > 552
+          if Prev6 > 78
+            - Set 255
+            - Set 178
+          if y > 522
+            - Set 60
+            if y > 27
+              if x > 747
+                - Set 60
+                if x > 32
+                  if Prev2 > 0
+                    if Prev3 > 0
+                      - Set 255
+                      if Prev5 > 20
+                        - Set 255
+                        - Set 60
+                    if Prev5 > 20
+                      if Prev3 > 0
+                        if Prev > 0
+                          - Set 255
+                          - Set 60
+                        - Set 60
+                      - Set 60
+                  - Set 60
+              - Set 60
+    if c > 4
+      /* L5 = 167 + 3|u| - 4ym: Prev3 = U, Prev4 = ym */
+      if Prev4 > 0
+        - N -4
+        if Prev3 > -65
+          if x > 0
+            if Prev3 > 0
+              - W +3
+              - W -3
+            - Set 167
+          - Set 362
+      if c > 3
+        /* L4 = 167 - 3|u| - 4ym: Prev2 = U, Prev3 = ym */
+        if Prev3 > 0
+          - N -4
+          if Prev2 > -65
+            if x > 0
+              if Prev2 > 0
+                - W -3
+                - W +3
+              - Set 167
+            - Set -28
+        if c > 2
+          /* L2 = ym - 3|u|: Prev1 = U, Prev2 = ym */
+          if Prev2 > 0
+            - N +1
+            if Prev > -65
+              if x > 0
+                if Prev > 0
+                  - W -3
+                  - W +3
+                - Set 0
+              - Set -195
+          if c > 1
+            /* U: Prev1 = ym. Row start copies the row above, flips when a new star row begins. */
+            if x > 0
+              if W > 63
+                - Set -65
+                - W +1
+              if y > 0
+                if Prev > 0
+                  - N 0
+                  if N > -1
+                    - Set -65
+                    - Set 0
+                - Set 0
+            if c > 0
+              /* ym */
+              if y > 0
+                if N > 53
+                  - Set 0
+                  - N +1
+                - Set 27
+              /* ys */
+              if y > 0
+                if N > 156
+                  - Set 0
+                  - N +1
+                - Set 0

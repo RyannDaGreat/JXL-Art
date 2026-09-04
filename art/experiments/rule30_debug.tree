@@ -1,0 +1,38 @@
+/* rule30_debug.tree — shows the raw Rule-30 channel used by digits.tree (white = on). */
+Width 1024 Height 1024
+HiddenChannel 1
+if c > 0
+  if c > 1
+    if c > 2
+      if Prev3 > 49
+        - Set 255
+        - Set 0
+      if Prev2 > 49
+        - Set 255
+        - Set 0
+    if Prev > 49
+      - Set 255
+      - Set 0
+  if y > 1
+    if x > 0
+      if N > 49
+        if NW-N > -51
+          - Set 0
+          - Set 100
+        if NW-N > 49
+          if N-NE > -50
+            - Set 100
+            - Set 0
+          if N-NE > -50
+            - Set 0
+            - Set 100
+      if N > 62
+        - N -63
+        - N +37
+    if y > 0
+      if N > 49
+        - Set 100
+        - Set 0
+      if W > 62
+        - W -63
+        - W +37

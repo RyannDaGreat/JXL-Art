@@ -1,0 +1,154 @@
+/* flag.tree — United States flag, 1946x1024 (10:19), 13 stripes of 79 px, canton 780x553,
+   50 five-pointed stars on the official 6/5 staggered lattice (row pitch 55, column pitch 65).
+   The image is two 1024-wide groups; coordinates are group-local, so the canton is limited to
+   group g=21 (left) and stripes use only y.
+   Channels (HiddenChannel 10 => c0..c9 state, c10..c12 = R,G,B):
+     c0 ys : y mod 158 (two stripes)                 c1 ym : (y + 27) mod 55 (star row cell)
+     c2 P  : star-row parity (flips when ym wraps)  c3 xm : x mod 130, odd rows start at 65
+     c4 A = 3xm - ym   c5 B = 3xm + ym   c6 C = 3xm + 4ym   c7 D = 3xm - 4ym   (half-plane coords)
+     c8 K  : 0 outside canton, 1 canton, 2 canton where stars may be drawn
+     c9 R  : region id 0 red, 1 blue, 2 white. A pixel is inside the star (center (65,30), R=30)
+             when at least 4 of 5 pentagram half-planes hold:
+             ym > 20, A <= 194, B > 195, C <= 361, D > 28. */
+Width 1946
+Height 1024
+HiddenChannel 10
+
+if c > 9
+  if c > 11
+    /* B: Prev3 = region */
+    if Prev3 > 1
+      - Set 255
+      if Prev3 > 0
+        - Set 110
+        - Set 52
+    if c > 10
+      /* G: Prev2 = region */
+      if Prev2 > 1
+        - Set 255
+        if Prev2 > 0
+          - Set 59
+          - Set 34
+      /* R: Prev1 = region */
+      if Prev > 1
+        - Set 255
+        if Prev > 0
+          - Set 60
+          - Set 178
+  if c > 8
+    /* region: Prev1=K Prev2=D Prev3=C Prev4=B Prev5=A Prev8=ym Prev9=ys */
+    if Prev > 1
+      if Prev8 > 20
+        if Prev5 > 194
+          if Prev4 > 195
+            if Prev3 > 361
+              - Set 1
+              if Prev2 > 28
+                - Set 2
+                - Set 1
+            - Set 1
+          if Prev4 > 195
+            if Prev3 > 361
+              if Prev2 > 28
+                - Set 2
+                - Set 1
+              - Set 2
+            if Prev3 > 361
+              - Set 1
+              if Prev2 > 28
+                - Set 2
+                - Set 1
+        if Prev5 > 194
+          - Set 1
+          if Prev4 > 195
+            if Prev3 > 361
+              - Set 1
+              if Prev2 > 28
+                - Set 2
+                - Set 1
+            - Set 1
+      if Prev > 0
+        - Set 1
+        if Prev9 > 78
+          - Set 2
+          - Set 0
+    if c > 7
+      /* K: Prev6 = P */
+      if g > 21
+        - Set 0
+        if x > 779
+          - Set 0
+          if y > 552
+            - Set 0
+            if y > 522
+              - Set 1
+              if y > 27
+                if x > 747
+                  - Set 1
+                  if Prev6 > 0
+                    if x > 64
+                      - Set 2
+                      - Set 1
+                    if x > 32
+                      - Set 2
+                      - Set 1
+                - Set 1
+      if c > 6
+        /* D = 3xm - 4ym: Prev4 = xm, Prev6 = ym */
+        if Prev4 > 0
+          - W +3
+          if Prev6 > 0
+            - N -4
+            - Set 0
+        if c > 5
+          /* C = 3xm + 4ym: Prev3 = xm, Prev5 = ym */
+          if Prev3 > 0
+            - W +3
+            if Prev5 > 0
+              - N +4
+              - Set 0
+          if c > 4
+            /* B = 3xm + ym: Prev2 = xm, Prev4 = ym */
+            if Prev2 > 0
+              - W +3
+              if Prev4 > 0
+                - N +1
+                - Set 0
+            if c > 3
+              /* A = 3xm - ym: Prev1 = xm, Prev3 = ym */
+              if Prev > 0
+                - W +3
+                if Prev3 > 0
+                  - N -1
+                  - Set 0
+              if c > 2
+                /* xm: Prev1 = P */
+                if x > 0
+                  if W > 128
+                    - Set 0
+                    - W +1
+                  if Prev > 0
+                    - Set 65
+                    - Set 0
+                if c > 1
+                  /* P: Prev1 = ym */
+                  if y > 0
+                    if Prev > 0
+                      - N 0
+                      if N > 0
+                        - Set 0
+                        - Set 1
+                    - Set 1
+                  if c > 0
+                    /* ym */
+                    if y > 0
+                      if N > 53
+                        - Set 0
+                        - N +1
+                      - Set 27
+                    /* ys */
+                    if y > 0
+                      if N > 156
+                        - Set 0
+                        - N +1
+                      - Set 0

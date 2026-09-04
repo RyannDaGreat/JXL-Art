@@ -1,0 +1,4 @@
+Width 1946 Height 1024
+if g > 21
+  - Set 255
+  - Set 0

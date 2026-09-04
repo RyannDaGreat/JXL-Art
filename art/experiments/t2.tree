@@ -1,0 +1,11 @@
+Width 1024 Height 1024
+HiddenChannel 1
+if c > 0
+  if Prev > 31
+    - Set 255
+    - Set 0
+  if x > 0
+    if W > 62
+      - Set 0
+      - W +1
+    - Set 0

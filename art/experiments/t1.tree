@@ -1,0 +1,4 @@
+Width 1024 Height 1024
+if x > 511
+  - Set 300
+  - Set -50
