@@ -80,6 +80,12 @@ LOGO_TEXT = "JXL-RS "                  # jxl_rs: every run of drawn cells spells
 LOGO_TONE_SPLIT = 3                    # jxl_rs: counter values 1..3 (JXL) in RUST_ORANGE, the rest in RUST_TAN
 RUST_ORANGE, RUST_TAN = (247, 76, 0), (222, 165, 132)   # Ferris orange; GitHub's Rust language colour
 CRT_AMBER_G = (-105, -50)              # jxl_rs_crt: G = R + delta for JXL (orange) and -RS (amber) phosphor; B = 0
+# Chromatic aberration (jxl_rs_crt): red extends one pixel left (full on the rim class), green and
+# blue one pixel right (full on the first trail pixel): red fringe on the left edge of every stroke,
+# cyan-green on the right. Glow classes 0..4 = background, trail 2, trail 1, lit, rim.
+ABERRATION_RIM = 4                     # rim gets its own class (the plain CRT text uses 2, same as trail 1)
+ABERRATION_G = (-8, -30, 95, None, -255)      # G = R + delta by class; None = the lit word tones (CRT_AMBER_G)
+ABERRATION_B = (-255, -255, 60, -255, -255)   # B = R + delta by class: only the right fringe gets blue
 OPTIMIZER_RESTARTS = 40
 
 # ---------------------------------------------------------------- tree DSL (pure functions)
@@ -730,10 +736,11 @@ def scanline_counter():
     return If("y", 0, If("N", CRT["scan"] - 2, Set(0), Leaf("N", 1)), Set(0))
 
 
-def class_channel(prev_pattern, prev_cc):
+def class_channel(prev_pattern, prev_cc, rim=2):
     """
-    Pure function. Glow class C: 3 on lit glyph pixels, W - 1 elsewhere (fading trail), 2 on the
-    pixel before a lit glyph column. Relies on pattern_channel computing the pattern one pixel
+    Pure function. Glow class C: 3 on lit glyph pixels, W - 1 elsewhere (fading trail), `rim` on
+    the pixel before a lit glyph column (2 by default, i.e. the same glow as the first trail
+    pixel; ABERRATION_RIM keeps it apart). Relies on pattern_channel computing the pattern one pixel
     before the glyph and peeling a bit on the LAST pixel of each column (crt=True layout), so on
     that pixel "lit" is W > 2 and the pattern's top bit already belongs to the next column.
 
@@ -742,7 +749,7 @@ def class_channel(prev_pattern, prev_cc):
         'if Prev2 > 447'
     """
     trail = If("W", 0, Leaf("W", -1), Set(0))
-    lit, rim = Set(3), Set(2)
+    lit, rim = Set(3), Set(rim)
     x0 = GLYPH_X0
     bit = [3, 1, 0]                       # "top bit set" threshold after 0, 1, 2 peels
     cases = [(cc_xm_gt(x0 + 3 * PIXEL - 1), trail)]
@@ -755,17 +762,34 @@ def class_channel(prev_pattern, prev_cc):
     return chain(prev_cc, cases, trail)
 
 
-def brightness_channel(prev_class, prev_scan):
+def brightness_channel(prev_class, prev_scan, levels=CRT["levels"]):
     """
-    Pure function. R channel of the CRT look: brightness by glow class, dimmed on dark scanlines.
+    Pure function. R channel of the CRT look: brightness by glow class (`levels[class]`), dimmed
+    on dark scanlines.
 
     Examples:
         >>> render(brightness_channel("Prev", "Prev2")).splitlines()[0]
         'if Prev > 2'
     """
-    levels = CRT["levels"]
     per_class = [If(prev_scan, 0, Set(v), Set(round(v * CRT["dark"]))) for v in levels]
     return chain(prev_class, [(k - 1, per_class[k]) for k in range(len(levels) - 1, 0, -1)], per_class[0])
+
+
+def delta_by_class(prev_class, deltas, lit):
+    """
+    Pure function. RCT delta channel (G or B = R + delta) chosen by glow class; the None entry
+    of `deltas` is the lit class and takes the `lit` subtree.
+
+    Examples:
+        >>> print(render(delta_by_class("Prev", (-8, None, 95), Set(-105))))
+        if Prev > 1
+          - Set 95
+          if Prev > 0
+            - Set -105
+            - Set -8
+    """
+    leaf = lambda k: lit if deltas[k] is None else Set(deltas[k])
+    return chain(prev_class, [(k - 1, leaf(k)) for k in range(len(deltas) - 1, 0, -1)], leaf(0))
 
 
 # ---------------------------------------------------------------- random equations (a CFG)
@@ -1153,10 +1177,17 @@ def build_piece(charset, mask, canvas, crt=False, text=None, name=None):
         trees["G"], trees["B"] = tone("G", 1), tone("B", 2)   # RCT 3 adds R; unlit pixels (R = 0) clamp to black
     elif crt:
         trees["sl"] = scanline_counter()
-        trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"))
-        trees["R"] = brightness_channel(prev("R", "C"), prev("R", "sl"))
-        trees["G"] = If(prev("G", "V"), LOGO_TONE_SPLIT, Set(CRT_AMBER_G[1]), Set(CRT_AMBER_G[0])) if text else Set(CRT["phosphor_g"])
-        trees["B"] = Set(-WHITE)             # RCT 3: G = R + delta, B = 0
+        if not text:
+            trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"))
+        if text:                         # amber tube with chromatic aberration (see ABERRATION_*)
+            trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"), rim=ABERRATION_RIM)
+            trees["R"] = brightness_channel(prev("R", "C"), prev("R", "sl"), CRT["levels"] + (CRT["levels"][-1],))
+            word = If(prev("G", "V"), LOGO_TONE_SPLIT, Set(CRT_AMBER_G[1]), Set(CRT_AMBER_G[0]))
+            trees["G"] = delta_by_class(prev("G", "C"), ABERRATION_G, word)
+            trees["B"] = delta_by_class(prev("B", "C"), ABERRATION_B, Set(-WHITE))
+        else:
+            trees["R"] = brightness_channel(prev("R", "C"), prev("R", "sl"))
+            trees["G"], trees["B"] = Set(CRT["phosphor_g"]), Set(-WHITE)   # RCT 3: G = R + 25, B = 0
     else:
         trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
         trees["G"] = trees["B"] = Set(0)      # RCT 3 adds R to these channels: grey = white/black
@@ -1173,7 +1204,7 @@ def build_piece(charset, mask, canvas, crt=False, text=None, name=None):
      (negative = blank cell); P glyph-row pattern (bit 2 = left pixel), shifted per glyph column; R glyph
      pixels; G and B are {"per-tone" if text else "0"} deltas (RCT 3 adds R).
      {f"S mask field ({mask}) and L crossing field: a cell is drawn when |L| <= w near the centre or |S| <= half-width elsewhere." if mask else ""}
-     {f"sl scanline counter; C glow class (3 lit, trail 2, 1); R brightness by class and scanline, G = R {f'{CRT_AMBER_G[0]} (JXL) / {CRT_AMBER_G[1]} (-RS)' if text else '+ 25'}, B = 0." if crt else ""}
+     {f"sl scanline counter; C glow class (3 lit, trail 2, 1); R brightness by class and scanline, G = R {f'{CRT_AMBER_G[0]} (JXL) / {CRT_AMBER_G[1]} (-RS); rim class {ABERRATION_RIM} and per-class G/B deltas = 1 px chromatic aberration' if text else '+ 25'}{'' if text else ', B = 0'}." if crt else ""}
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}
 Height {canvas[1]}

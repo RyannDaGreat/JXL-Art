@@ -250,3 +250,9 @@
 ## 2026-09-04 11:30 — jxl_rs_crt
 - User: "Very nice, I do miss the scanlines / An old terminal orange scanline pattern would go hard".
   Reused the CRT channels (sl, C, brightness) with G = R - 105 / -50 by word and B = 0.
+
+## 2026-09-04 11:50 — chromatic aberration on jxl_rs_crt
+- User: "add a lil chromatic abberatin plz". A channel cannot read a neighbour of an earlier channel,
+  so a real shift is impossible; instead the glow class (which already encodes "pixel before lit"
+  and "pixels after lit") drives per-channel brightness: red full on the rim, green/blue full on the
+  first trail pixel. Rim became class 4 to tell it from the first trail pixel (both were 2).

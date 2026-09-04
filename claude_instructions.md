@@ -144,6 +144,8 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 > "Very nice, I do miss the scanlines
 > An old terminal orange scanline pattern would go hard"
 
+> "add a lil chromatic abberatin plz"
+
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
 installs that leave no trace in the dump. Top level therefore holds `setup.sh` next to the manifest.
@@ -302,7 +304,7 @@ Same text and mask as v1 plus two hidden channels and a colour rule (all in art/
   (user: "not smooth and seems to have added a lot of bytes"; it cost ~130 B). Smooth vignettes
   are not available: brightness can only take a few discrete leaf values per region.
 
-### jxl_rs — jxl_rs.tree (394 B), jxl_rs_crt.tree (459 B)
+### jxl_rs — jxl_rs.tree (394 B), jxl_rs_crt.tree (485 B)
 Generate with `--mask lemniscate --logo` and `--mask lemniscate --logo --crt`. The infinity of text_infinity, but every run of drawn
 cells (a row's stretch inside the mask, starting at its left edge) spells `LOGO_TEXT` = "JXL-RS "
 instead of random glyphs, in Rust colours: "JXL" in Ferris orange (247, 76, 0), "-RS" in the tan
@@ -321,6 +323,13 @@ seamless at 64 cells) would stop runs from starting with "J", so the seam was ke
 text_infinity_v2 (every 4th row at 0.55, phosphor trail classes with levels 8/60/120/215, glow rim) as an
 amber phosphor: B = 0 everywhere, G = R + CRT_AMBER_G by word (-105 for JXL: orange, -50 for -RS:
 amber), so the dim trail and the raster glow fall toward dark red like a real amber tube.
+Chromatic aberration (user: "add a lil chromatic abberatin plz"): the rim (the pixel before a lit
+glyph column, known one pixel early from the pattern channel) is its own glow class ABERRATION_RIM = 4
+with full red brightness, so red extends one pixel to the left of every stroke; G and B take per-class
+deltas (ABERRATION_G / ABERRATION_B: lit keeps the word tones, the first trail pixel gets G = R + 95
+and B = R + 60, the rim gets none) so green and blue extend one pixel to the right. Result: a red
+fringe on the left edge and a cyan-green one on the right, one pixel wide (a quarter of a glyph
+pixel). text_infinity_v2 keeps rim class 2 and its bytes.
 
 ### equations — equations.tree (556 B), equations_crt.tree (625 B), equations_v2.tree (705 B), equations_v3.tree (652 B), equations_v4.tree (840 B)
 Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 1 --random_length` (v2) and
