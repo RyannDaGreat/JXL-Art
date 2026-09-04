@@ -21,8 +21,8 @@ left to right. This is what the JXL Art community does; the web tool is https://
 5. `equations` — lines of random well-formed equations with matched parentheses, function
    names written downward; `equations_crt` — the same with the CRT look; `equations_v2` —
    names inline (SIN COS TAN EXP), syntax-coloured by token kind, two 60-token equations per
-   row with a 4-cell gap; `equations_v3` — the same on a 1024x1024 single-group canvas, one
-   64-token equation per line.
+   row with a 4-cell gap and a blank row between lines; `equations_v3` — the same on a
+   1024x1024 single-group canvas, one 64-token equation per line.
 
 **Hard constraints:** file size <= 1024 bytes (`anything above a kilobyte is banned`), image
 >= 1024x1024, the CA must drive the randomness, every result is visually verified by Claude
@@ -284,8 +284,8 @@ Same text and mask as v1 plus two hidden channels and a colour rule (all in art/
   (user: "not smooth and seems to have added a lot of bytes"; it cost ~130 B). Smooth vignettes
   are not available: brightness can only take a few discrete leaf values per region.
 
-### equations — equations.tree (561 B), equations_crt.tree (630 B), equations_v2.tree (675 B), equations_v3.tree (658 B)
-Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 4` (v2) and
+### equations — equations.tree (561 B), equations_crt.tree (630 B), equations_v2.tree (698 B), equations_v3.tree (658 B)
+Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 4 --row_gap 1` (v2) and
 `--equations --inline --width 1024 --name equations_v3` (v3).
 A context-free grammar rendered as text. Matched parentheses of one kind are a one-counter
 language (Dyck-1), so no stack is needed: tokens are generated left to right, one per 16x32 cell,
@@ -307,12 +307,14 @@ choices use the 5-bit value V. The first band is blank (too close to the seed ro
   channel K = 0 unlit else 1 + kind of the glyph (parens, operators, variables, digits,
   functions; the glyph order keeps kinds contiguous so kind = thresholds on the token), and
   R G B are five-entry palette lookups (EQ_PALETTE), no RCT. `gap` cells at the end of each
-  group stay blank (v2: 60-token equations, 4-cell gap between the two per row).
+  group stay blank (v2: 60-token equations, 4-cell gap between the two per row); `row_gap`
+  blank cell rows between lines are made by a row-type channel RT (period row_gap + 1) that
+  blanks the state on spacer rows (v2: 1, so 15 lines per group).
 - v3 (`equations_v3`, user: "one equation per line"): v2 on a 1024x1024 canvas. One decoder
   group means one line per cell row; a line cannot span two groups because groups decode
   independently and the depth counter cannot cross the boundary.
 Verification: `python3.10 art/experiments/verify_equations.py equations|equations_v2` reads the
-glyphs back from the PNG (max of R,G,B > 60 = lit) and checks every line: 20/20, 60/60, 30/30.
+glyphs back from the PNG (max of R,G,B > 60 = lit) and checks every line: 20/20, 30/30, 30/30.
 
 ### Decoder validity: no redundant splits
 libjxl validates trees on decode: a split on a property whose outcome is already fixed by an
@@ -335,7 +337,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Nine `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 559 B, equations_crt 630 B, equations_v2 675 B, equations_v3 658 B (1024x1024); six of them at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Nine `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 559 B, equations_crt 630 B, equations_v2 698 B, equations_v3 658 B (1024x1024); six of them at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 

@@ -205,3 +205,8 @@
 - MISTAKE: adding EXP made "E" the first glyph in v1's order, and the successor lookup treated a
   blank neighbour (-1) like index 0, filling hanging rows with "X"; guarded with `prop > -1`.
 - Sizes: v2 675 B, v3 658 B, v1 561 B, crt 630 B. All verified.
+
+## 2026-09-04 09:10 — v2 vertical spacing
+- User repeated "add some space between them in the dense version"; read as vertical too. Added
+  `row_gap`: a row-type channel (period row_gap + 1) blanks the state on spacer rows. v2 now has a
+  blank row between lines (15 per group) plus the 4-cell horizontal gap: 698 B. Verified 30/30.

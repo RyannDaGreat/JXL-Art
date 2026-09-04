@@ -3,15 +3,15 @@
    automaton; one token per cell, 60 cells per equation, one equation per decoder group and cell row;
    function names inline, tokens coloured by kind.
    Glyph order: '()^=+-·/YZ132XAONPECSTI'
-   Channels: c0 cc, c1 A, c2 V, c3 S, c4 T, c5 P, c6 K, c7 R, c8 G, c9 B
+   Channels: c0 cc, c1 A, c2 V, c3 RT, c4 S, c5 T, c6 P, c7 K, c8 R, c9 G, c10 B
      cc cell counter; A Rule 30; V 5 random bits; S = 8*class + depth; T glyph index; P glyph-row pattern;
      K colour index (0 unlit, else 1 + kind); R G B palette lookups.
-   Nodes: 481 */
+   Nodes: 493 */
 Width 2048
 Height 1024
 
-HiddenChannel 7
-if c > 8
+HiddenChannel 8
+if c > 9
   if Prev3 > 4
     - Set 90
     if Prev3 > 3
@@ -23,7 +23,7 @@ if c > 8
           if Prev3 > 0
             - Set 170
             - Set 0
-  if c > 7
+  if c > 8
     if Prev2 > 4
       - Set 220
       if Prev2 > 3
@@ -35,7 +35,7 @@ if c > 8
             if Prev2 > 0
               - Set 170
               - Set 0
-    if c > 6
+    if c > 7
       if Prev > 4
         - Set 255
         if Prev > 3
@@ -47,10 +47,10 @@ if c > 8
               if Prev > 0
                 - Set 170
                 - Set 0
-      if c > 5
-        if Prev6 > 447
+      if c > 6
+        if Prev7 > 447
           - Set 0
-          if Prev6 > 319
+          if Prev7 > 319
             if Prev > 0
               if Prev2 > 12
                 - Set 5
@@ -62,7 +62,7 @@ if c > 8
                       - Set 2
                       - Set 1
               - Set 0
-            if Prev6 > 191
+            if Prev7 > 191
               if Prev > 1
                 if Prev2 > 12
                   - Set 5
@@ -74,7 +74,7 @@ if c > 8
                         - Set 2
                         - Set 1
                 - Set 0
-              if Prev6 > 63
+              if Prev7 > 63
                 if Prev > 3
                   if Prev2 > 12
                     - Set 5
@@ -87,24 +87,24 @@ if c > 8
                           - Set 1
                   - Set 0
                 - Set 0
-        if c > 4
-          if Prev5 > 95
-            if Prev5 > 351
+        if c > 5
+          if Prev6 > 95
+            if Prev6 > 351
               - W 0
-              if Prev5 > 319
+              if Prev6 > 319
                 if W > 1
                   - W -2
                   - W 0
-                if Prev5 > 223
+                if Prev6 > 223
                   - W 0
-                  if Prev5 > 191
+                  if Prev6 > 191
                     if W > 3
                       - W -4
                       - W 0
                     - W 0
-            if Prev5 > 63
+            if Prev6 > 63
               if Prev > -1
-                if Prev5 > 91
+                if Prev6 > 91
                   if Prev > 15
                     if Prev > 19
                       if Prev > 21
@@ -132,7 +132,7 @@ if c > 8
                         if Prev > 1
                           - Set 0
                           - Set 2
-                  if Prev5 > 87
+                  if Prev6 > 87
                     if Prev > 8
                       if Prev > 12
                         if Prev > 19
@@ -164,7 +164,7 @@ if c > 8
                           if Prev > 0
                             - Set 1
                             - Set 4
-                    if Prev5 > 83
+                    if Prev6 > 83
                       if Prev > 12
                         if Prev > 16
                           if Prev > 19
@@ -190,7 +190,7 @@ if c > 8
                             if Prev > 0
                               - Set 1
                               - Set 4
-                      if Prev5 > 79
+                      if Prev6 > 79
                         if Prev > 7
                           if Prev > 12
                             if Prev > 20
@@ -218,7 +218,7 @@ if c > 8
                               if Prev > 0
                                 - Set 1
                                 - Set 4
-                        if Prev5 > 75
+                        if Prev6 > 75
                           if Prev > 12
                             if Prev > 17
                               if Prev > 20
@@ -247,24 +247,24 @@ if c > 8
                           - Set 0
                 - Set 0
               - N 0
-          if c > 3
+          if c > 4
             if y > 0
-              if Prev4 > 63
+              if Prev5 > 63
                 - W 0
-                if Prev4 > 31
-                  if Prev4 > 43
+                if Prev5 > 31
+                  if Prev5 > 43
                     - N 0
-                    if Prev4 > 42
+                    if Prev5 > 42
                       if Prev > 55
                         - Set -1
                         if Prev > 47
-                          if Prev2 > 13
+                          if Prev3 > 13
                             - Set 8
-                            if Prev2 > 8
+                            if Prev3 > 8
                               - Set 9
-                              if Prev2 > 5
+                              if Prev3 > 5
                                 - Set 10
-                                if Prev2 > 2
+                                if Prev3 > 2
                                   - Set 12
                                   - Set 11
                           if Prev > 39
@@ -314,181 +314,193 @@ if c > 8
                                           - Set -1
                                   - Set -1
                                 if Prev > 15
-                                  if Prev2 > 22
+                                  if Prev3 > 22
                                     - Set 18
-                                    if Prev2 > 21
+                                    if Prev3 > 21
                                       - Set 21
-                                      if Prev2 > 20
+                                      if Prev3 > 20
                                         - Set 19
                                         - Set 20
                                   if Prev > 7
                                     if Prev > 8
-                                      if Prev2 > 17
+                                      if Prev3 > 17
                                         - Set 4
-                                        if Prev2 > 12
+                                        if Prev3 > 12
                                           - Set 5
-                                          if Prev2 > 7
+                                          if Prev3 > 7
                                             - Set 6
-                                            if Prev2 > 3
+                                            if Prev3 > 3
                                               - Set 7
                                               - Set 2
-                                      if Prev2 > 17
+                                      if Prev3 > 17
                                         - Set 4
-                                        if Prev2 > 12
+                                        if Prev3 > 12
                                           - Set 5
-                                          if Prev2 > 7
+                                          if Prev3 > 7
                                             - Set 6
-                                            if Prev2 > 5
+                                            if Prev3 > 5
                                               - Set 7
                                               - Set 3
                                     - Set 0
                       - N 0
                   - W 0
               - Set -1
-            if c > 2
+            if c > 3
               if x > 0
-                if Prev3 > 63
+                if Prev4 > 63
                   - W 0
-                  if Prev3 > 31
-                    if Prev3 > 43
+                  if Prev4 > 31
+                    if Prev4 > 43
                       - N 0
-                      if Prev3 > 42
-                        if y > 51
-                          if W > 55
-                            - Set 56
-                            if W > 47
-                              if x > 928
-                                if W > 48
-                                  - W -9
-                                  - Set 56
-                                if x > 896
+                      if Prev4 > 42
+                        if Prev > 0
+                          - Set 56
+                          if y > 51
+                            if W > 55
+                              - Set 56
+                              if W > 47
+                                if x > 928
                                   if W > 48
                                     - W -9
-                                    - W -40
-                                  if W > 48
-                                    if Prev > 21
-                                      - W -9
-                                      - W -40
-                                    - W -40
-                              if W > 39
-                                if x > 928
-                                  if W > 40
-                                    - W -1
                                     - Set 56
                                   if x > 896
+                                    if W > 48
+                                      - W -9
+                                      - W -40
+                                    if W > 48
+                                      if Prev2 > 21
+                                        - W -9
+                                        - W -40
+                                      - W -40
+                                if W > 39
+                                  if x > 928
                                     if W > 40
                                       - W -1
-                                      - W -32
-                                    if W > 40
-                                      if Prev > 21
+                                      - Set 56
+                                    if x > 896
+                                      if W > 40
                                         - W -1
                                         - W -32
-                                      - W -32
-                                if W > 31
-                                  - W -31
-                                  if W > 23
-                                    - W 8
-                                    if W > 15
+                                      if W > 40
+                                        if Prev2 > 21
+                                          - W -1
+                                          - W -32
+                                        - W -32
+                                  if W > 31
+                                    - W -31
+                                    if W > 23
                                       - W 8
-                                      if W > 7
-                                        if x > 864
-                                          - W 40
-                                          if x > 832
-                                            if Prev > 23
-                                              if W > 10
-                                                - W 40
-                                                - W -7
-                                              - W 40
-                                            if Prev > 23
-                                              if W > 10
-                                                - W 40
-                                                - W -7
-                                              if Prev > 19
+                                      if W > 15
+                                        - W 8
+                                        if W > 7
+                                          if x > 864
+                                            - W 40
+                                            if x > 832
+                                              if Prev2 > 23
                                                 if W > 10
                                                   - W 40
-                                                  - W 8
+                                                  - W -7
                                                 - W 40
-                                        if x > 864
-                                          - W 48
-                                          if x > 832
-                                            if Prev > 23
-                                              if W > 2
-                                                - W 48
-                                                - W 1
-                                              - W 48
-                                            if Prev > 23
-                                              if W > 2
-                                                - W 48
-                                                - W 1
-                                              if Prev > 19
+                                              if Prev2 > 23
+                                                if W > 10
+                                                  - W 40
+                                                  - W -7
+                                                if Prev2 > 19
+                                                  if W > 10
+                                                    - W 40
+                                                    - W 8
+                                                  - W 40
+                                          if x > 864
+                                            - W 48
+                                            if x > 832
+                                              if Prev2 > 23
                                                 if W > 2
                                                   - W 48
-                                                  - W 16
+                                                  - W 1
                                                 - W 48
-                          - Set 56
+                                              if Prev2 > 23
+                                                if W > 2
+                                                  - W 48
+                                                  - W 1
+                                                if Prev2 > 19
+                                                  if W > 2
+                                                    - W 48
+                                                    - W 16
+                                                  - W 48
+                            - Set 56
                         - N 0
                     - W 0
                 - Set 8
-              if c > 1
-                if Prev2 > 63
+              if c > 2
+                if x > 0
                   - W 0
-                  if Prev2 > 31
-                    if y > 51
-                      if Prev2 > 43
-                        - N 0
-                        if Prev2 > 42
-                          if Prev > 511
-                            - N 1
-                            - N 0
-                          if Prev2 > 41
-                            if Prev > 511
-                              - N 2
-                              - N 0
-                            if Prev2 > 40
-                              if Prev > 511
-                                - N 4
-                                - N 0
-                              if Prev2 > 39
-                                if Prev > 511
-                                  - N 8
-                                  - N 0
-                                if Prev2 > 38
-                                  if Prev > 511
-                                    - Set 16
-                                    - Set 0
-                                  - N 0
-                      - Set -1
-                    - Set -1
-                if c > 0
                   if y > 0
-                    if x > 0
-                      if N > 511
-                        if NW-N > -513
-                          - Set 0
-                          - Set 1024
-                        if NW-N > 511
-                          if N-NE > -512
-                            - Set 1024
-                            - Set 0
-                          if N-NE > -512
-                            - Set 0
-                            - Set 1024
-                      if N > 390
-                        - N -391
-                        - N 633
-                    if g > 21
-                      if W > 612
-                        - W -613
-                        - W 411
-                      if W > 390
-                        - W -391
-                        - W 633
-                  if x > 0
-                    if W > 479
-                      - W -480
-                      - W 32
-                    if y > 0
-                      if N > 30
-                        - N -31
+                    if Prev3 > 0
+                      - N 0
+                      if N > 0
+                        - Set 0
                         - N 1
-                      - Set 12
+                    - Set 1
+                if c > 1
+                  if Prev2 > 63
+                    - W 0
+                    if Prev2 > 31
+                      if y > 51
+                        if Prev2 > 43
+                          - N 0
+                          if Prev2 > 42
+                            if Prev > 511
+                              - N 1
+                              - N 0
+                            if Prev2 > 41
+                              if Prev > 511
+                                - N 2
+                                - N 0
+                              if Prev2 > 40
+                                if Prev > 511
+                                  - N 4
+                                  - N 0
+                                if Prev2 > 39
+                                  if Prev > 511
+                                    - N 8
+                                    - N 0
+                                  if Prev2 > 38
+                                    if Prev > 511
+                                      - Set 16
+                                      - Set 0
+                                    - N 0
+                        - Set -1
+                      - Set -1
+                  if c > 0
+                    if y > 0
+                      if x > 0
+                        if N > 511
+                          if NW-N > -513
+                            - Set 0
+                            - Set 1024
+                          if NW-N > 511
+                            if N-NE > -512
+                              - Set 1024
+                              - Set 0
+                            if N-NE > -512
+                              - Set 0
+                              - Set 1024
+                        if N > 390
+                          - N -391
+                          - N 633
+                      if g > 21
+                        if W > 612
+                          - W -613
+                          - W 411
+                        if W > 390
+                          - W -391
+                          - W 633
+                    if x > 0
+                      if W > 479
+                        - W -480
+                        - W 32
+                      if y > 0
+                        if N > 30
+                          - N -31
+                          - N 1
+                        - Set 12

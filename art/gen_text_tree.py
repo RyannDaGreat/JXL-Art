@@ -727,20 +727,20 @@ def eq_successors():
     return successor
 
 
-def eq_row_type(prev_cc):
+def eq_row_type(prev_cc, period=EQ_ROWS, init=EQ_RT_INIT):
     """
-    Pure function. v1 RT channel: 0 on expression rows, 1 and 2 on the hanging rows; advances at
-    the start of each cell band, copied right.
+    Pure function. RT channel: cycles 0 .. period-1 per cell band (0 = expression row; v1 uses
+    1 and 2 for the hanging rows, v2 uses 1 for a blank spacer row), copied right.
 
     Examples:
         >>> render(eq_row_type("Prev3")).splitlines()[0]
         'if x > 0'
     """
-    step = If("N", EQ_ROWS - 2, Set(0), Leaf("N", 1))
-    return If("x", 0, Leaf("W", 0), If("y", 0, If(prev_cc, 0, Leaf("N", 0), step), Set(EQ_RT_INIT)))
+    step = If("N", period - 2, Set(0), Leaf("N", 1))
+    return If("x", 0, Leaf("W", 0), If("y", 0, If(prev_cc, 0, Leaf("N", 0), step), Set(init)))
 
 
-def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y):
+def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev_rt=None):
     """
     Pure function. State channel S (see above), decided once per cell at xm == SAMPLE_X on
     `decide_row`, copied right (W) and down (N); reset at x == 0 (each decoder group is one
@@ -778,6 +778,8 @@ def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y):
         cases += [(base("FUNC") - 1, Leaf("W", 1 - base("FUNC")))]
     cases += [(base("OP") - 1, expect_operand(base("OP")))]
     decide = If("y", first_line_y - 1, chain("W", cases, expect_operand(0)), Set(base("BLANK")))
+    if prev_rt is not None:                  # spacer rows (row type != 0) stay blank
+        decide = If(prev_rt, 0, Set(base("BLANK")), decide)
     sample = If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0),
                 If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row - 1), decide, Leaf("N", 0)))
     cell = chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), sample)], Leaf("W", 0))
@@ -883,12 +885,13 @@ def kinds_order():
     return [ch for glyphs in EQ_KINDS.values() for ch in best_order(glyphs, dist)]
 
 
-def build_equations(canvas, crt=False, inline=False, gap=0, name=None):
+def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0):
     """
     Pure function. (tree source, channel names, glyph order) for the random-equations piece.
     inline=True is v2: names written inline and syntax-coloured (no CRT variant). `gap` cells at
     the end of each decoder group stay blank (space between side-by-side equations). A
-    1024-wide canvas is one group, i.e. one equation per line.
+    1024-wide canvas is one group, i.e. one equation per line. `row_gap` blank cell rows are
+    left between equation rows (inline only; v1 already has its two hanging rows).
 
     Examples:
         >>> build_equations((2048, 1024))[1]
@@ -909,13 +912,17 @@ def build_equations(canvas, crt=False, inline=False, gap=0, name=None):
     line_cells = min(canvas[0], GROUP) // CELL_W - gap
     first_line_y = Y_OFFSET + CELL_H            # the first band is blank (too close to the seed row)
 
-    names = ["cc", "A", "V"] + ([] if inline else ["RT"]) + ["S", "T", "P"] + (["K"] if inline else ["sl", "C"] if crt else []) + ["R", "G", "B"]
+    spaced = inline and row_gap > 0
+    names = ["cc", "A", "V"] + (["RT"] if not inline or spaced else []) + ["S", "T", "P"] + (["K"] if inline else ["sl", "C"] if crt else []) + ["R", "G", "B"]
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {"cc": cell_counter(), "A": rule30(two_groups)}
     trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0)
     if not inline:
         trees["RT"] = eq_row_type(prev("RT", "cc"))
-    trees["S"] = eq_state(prev("S", "V"), prev("S", "cc"), decide_row, line_cells, inline, first_line_y)
+    elif spaced:
+        trees["RT"] = eq_row_type(prev("RT", "cc"), period=row_gap + 1, init=row_gap)   # band 1 is an expression row
+    trees["S"] = eq_state(prev("S", "V"), prev("S", "cc"), decide_row, line_cells, inline, first_line_y,
+                          prev("S", "RT") if spaced else None)
     trees["T"] = eq_token(order, prev("T", "S"), prev("T", "V"), prev("T", "cc"), decide_row, inline,
                           None if inline else prev("T", "RT"))
     trees["P"] = pattern_channel(order, prev("P", "T"), prev("P", "cc"), early=1 if crt else 0, flip=False)
@@ -1016,7 +1023,7 @@ HiddenChannel {len(names) - 3}
     return header + render(tree) + "\n", names, order
 
 
-def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0):
+def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0, row_gap=0):
     """
     Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree / equations.tree);
     prints node count. Default canvas: 1024x1024 without a mask, 2048x1024 with one or for equations.
@@ -1026,13 +1033,13 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         >>> # generate(mask="lemniscate", name="text_infinity")  -> text_infinity.tree (2048x1024)
         >>> # generate(mask="lemniscate", crt=True, name="text_infinity_v2")   -> CRT look
         >>> # generate(equations=True)                                         -> equations.tree
-        >>> # generate(equations=True, inline=True, gap=4)                     -> equations_v2.tree (two per row, gap)
+        >>> # generate(equations=True, inline=True, gap=4, row_gap=1)          -> equations_v2.tree (two per row, gaps)
         >>> # generate(equations=True, inline=True, width=1024, name="equations_v3")  -> one equation per line
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
     canvas = (width or (2 * GROUP if (mask or equations) else GROUP), height)
     if equations:
-        src, names, order = build_equations(canvas, crt, inline, gap, name)
+        src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap)
         default_name = "equations" + ("_v2" if inline else "_crt" if crt else "")
     else:
         src, names, order = build_piece(charset, mask, canvas, crt)
