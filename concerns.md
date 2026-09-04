@@ -142,3 +142,12 @@
   crossing. Bolder strokes make the knot *relatively* smaller (ratio ~ sqrt(a / stroke)).
 - Sizes: text_infinity 471 B (32 glyphs; the polynomial needs a chain per group, ~+30 B over
   the ellipses), text 346 B. Removed the ellipse mask code (git history has it).
+
+## 2026-09-04 04:40 — de-glooping the crossing
+- User: "it looks so gloopy omg lolol". The level-set knot was a blob with flaring arms.
+- Added channel L = 8|v| - 5|u| (linear, separable): inside |u| < 451 px cells are drawn iff
+  |L| <= 1027, i.e. two straight strokes of constant width crossing at 2*atan(5/8) = 64 deg; the
+  lobes keep the polynomial band. Line slope and width are computed from the polynomial band's
+  v-span at the reach so the two bands meet without a jog (matching the *hole* edge matters:
+  at a smaller reach the hole has only just opened and the inner edges would not line up).
+- text_infinity 524 B (+53 B: one channel, per-group gate with the update subtree 4x).

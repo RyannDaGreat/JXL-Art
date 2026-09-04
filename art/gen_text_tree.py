@@ -28,7 +28,9 @@ Character order is optimised (random restarts + 2-opt) to minimise pattern chang
 Canvases wider than one JPEG XL group (1024 px) decode as independent groups with local x, so
 the seed row and the mask field branch on the group id g (21 = left, 22 = right).
 """
+import math
 import random
+from fractions import Fraction
 from pathlib import Path
 
 import fire
@@ -432,6 +434,66 @@ def colour_channel(prev_pattern, prev_cc):
 # pieces aligned to the centre; the value is exact at breakpoints and off by a few px between.
 LEMNISCATE = dict(power=3.5, a=0.44, k=1.4, eps_in=100000, eps_out=100000, scale=16, piece_x=128, piece_y=128)
 # a: lobe tips at cx +- a*W; k: vertical squash; eps in px^2 units (stroke ~ 2 eps / |grad S|)
+# The crossing: a level-set band bulges where the gradient vanishes, so within |u| < REACH * W
+# the strokes are drawn instead as two straight lines v = +-s u of constant width, i.e. the band
+# |L| <= w of the linear field L = den |v| - num |u| (num/den ~ s), fitted so the line passes
+# through the centre of the polynomial band at |u| = REACH * W and has the same height there.
+XBAND = dict(reach=0.22, max_denominator=9)
+
+
+def lemniscate_profile(canvas):
+    """
+    Pure function. (f, g, cx, cy): f(u) = |u|^p / a^(p-2) - u^2 and g(v) = k v^2 in px^2 units.
+
+    Examples:
+        >>> f, g, cx, cy = lemniscate_profile((2048, 1024))
+        >>> round(f(901)), round(g(10))
+        (0, 140)
+    """
+    cx, cy, a, k = canvas[0] // 2, canvas[1] // 2, round(LEMNISCATE["a"] * canvas[0]), LEMNISCATE["k"]
+    pw = LEMNISCATE["power"]
+    return (lambda u: abs(u) ** pw / a ** (pw - 2) - u ** 2), (lambda v: k * v ** 2), cx, cy
+
+
+def xband_geometry(canvas):
+    """
+    Pure function. (reach, num, den, w): at |u| = reach the polynomial band spans v in
+    [v_in, v_out]; the crossing line v = (num/den) |u| goes through the middle of that span and
+    |L| <= w, L = den |v| - num |u|, has the same height there.
+
+    Examples:
+        >>> reach, num, den, w = xband_geometry((2048, 1024))
+        >>> reach, 0 < num / den < 1, w > 0
+        (451, True, True)
+    """
+    f, g, _, _ = lemniscate_profile(canvas)
+    k = LEMNISCATE["k"]
+    reach = round(XBAND["reach"] * canvas[0])
+    s0 = f(reach)                                        # S on the u axis (negative inside a lobe)
+    v_in = math.sqrt(max(0.0, -LEMNISCATE["eps_in"] - s0) / k)
+    v_out = math.sqrt((LEMNISCATE["eps_out"] - s0) / k)
+    slope = Fraction((v_in + v_out) / 2 / reach).limit_denominator(XBAND["max_denominator"])
+    return reach, slope.numerator, slope.denominator, round(slope.denominator * (v_out - v_in) / 2)
+
+
+def xband_field(canvas):
+    """
+    Pure function. Field channel L = den |y - cy| - num |x - cx| grown with +-num / +-den steps
+    (per group: |u| = x' in the right group, GROUP - x' in the left one).
+
+    Examples:
+        >>> render(xband_field((1024, 1024))).splitlines()[0]
+        'if x > 0'
+    """
+    _, num, den, _ = xband_geometry(canvas)
+    cx, cy = canvas[0] // 2, canvas[1] // 2
+    ys = If("y", cy, Leaf("N", den), Leaf("N", -den))
+    if canvas[0] > GROUP:
+        xs = per_group(True, Leaf("W", num), Leaf("W", -num))
+        base = per_group(True, Set(den * cy - num * GROUP), Set(den * cy))
+    else:
+        xs, base = If("x", cx, Leaf("W", -num), Leaf("W", num)), Set(den * cy - num * cx)
+    return If("x", 0, xs, If("y", 0, ys, base))
 
 
 def lemniscate_geometry(canvas):
@@ -504,16 +566,26 @@ def lemniscate_field(canvas):
     return If("x", 0, xs, If("y", 0, ys, base))
 
 
-def lemniscate_gate(canvas, prev_field):
+def lemniscate_gate(canvas, prev_field, prev_xband):
     """
-    Pure function. gate(update) for value_channel: BLANK unless |S| <= half-width.
+    Pure function. gate(update) for value_channel: within |u| < reach a cell is drawn when
+    |L| <= w (straight crossing strokes), elsewhere when |S| <= half-width (the lobes).
 
     Examples:
-        >>> render(lemniscate_gate((2048, 1024), "Prev")(Set(1))).splitlines()[0]
-        'if PrevAbs > 6250'
+        >>> render(lemniscate_gate((2048, 1024), "Prev2", "Prev")(Set(1))).splitlines()[0]
+        'if g > 21'
     """
     half_width = lemniscate_geometry(canvas)[5]
-    return lambda update: If(prev_field + "Abs", half_width, Set(BLANK), update)
+    reach, _, _, w = xband_geometry(canvas)
+    cx = canvas[0] // 2
+
+    def gate(update):
+        lobes = If(prev_field + "Abs", half_width, Set(BLANK), update)
+        crossing = If(prev_xband + "Abs", w, Set(BLANK), update)
+        if canvas[0] > GROUP:
+            return per_group(True, If("x", GROUP - reach - 1, crossing, lobes), If("x", reach - 1, lobes, crossing))
+        return If("x", cx + reach, lobes, If("x", cx - reach - 1, crossing, lobes))
+    return gate
 
 
 # ---------------------------------------------------------------- assembling a piece
@@ -538,14 +610,15 @@ def build_piece(charset, mask, canvas):
     dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
     order = best_order(charset, dist)
 
-    names = (["S"] if mask else []) + ["cc", "A", "V", "P", "R", "G", "B"]
+    names = (["S", "L"] if mask else []) + ["cc", "A", "V", "P", "R", "G", "B"]
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {}
     if mask:
         trees["S"] = lemniscate_field(canvas)
+        trees["L"] = xband_field(canvas)
     trees["cc"] = cell_counter()
     trees["A"] = rule30(two_groups)
-    gate = lemniscate_gate(canvas, prev("V", "S")) if mask else None
+    gate = lemniscate_gate(canvas, prev("V", "S"), prev("V", "L")) if mask else None
     trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
     trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"))
     trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
@@ -560,7 +633,7 @@ def build_piece(charset, mask, canvas):
      cc = {CELL_H}*xm + ym cell counter; A Rule 30 (on = {CA_ON}); V character value from A in column
      xm == {SAMPLE_X}, rows ym {sample_y0}..{sample_y0 + bits - 1} (negative = blank cell); P glyph-row pattern (bit 2 =
      left pixel), shifted per glyph column; R glyph pixels; G and B are 0 deltas (RCT 3 adds R).
-     {f"S mask field ({mask}); a cell is blank unless |S| <= half-width at its sample point." if mask else ""}
+     {f"S mask field ({mask}) and L crossing field: a cell is drawn when |L| <= w near the centre or |S| <= half-width elsewhere." if mask else ""}
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}
 Height {canvas[1]}
