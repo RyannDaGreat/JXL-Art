@@ -64,3 +64,42 @@
   (L2 = ym-3|u|, L4 = 167-3|u|-4ym, L5 = 167+3|u|-4ym) and a 13-node star test replace 4 channels
   and a 29-node ">=4 of 5" tree. Row parity folded into the U counter (flips when ym wraps).
   Region + K channels folded into R; G and B derived from R by thresholds. 13 -> 9 channels.
+
+## 2026-09-04 00:10 — flag golf outcome
+- Probed header cost: HiddenChannel 0/1/2/4/8 => 24/30/36/48/72 B, i.e. 6 B per hidden channel.
+  Node removals in repetitive trees saved nothing (v4 = v3 = 223 B); RCT 3 colour deltas saved 1 B
+  (blue G 59 -> 60); a 2:1 canvas would save 2 B (rejected: wrong aspect); a single-group
+  upsampled version ~8 B (rejected: blur). Final flag.tree 222 B, user approved the look.
+
+## 2026-09-04 00:30 — infinity text, first attempts (too big)
+- Two elliptical rings via a separable quadratic field with 64-px chord slopes: 510 B. Lemniscate
+  of Gerono (separable quartic): ~570 B. User: "omg why did it make it sooo much bigger ... the code
+  looks so repetetive too ... surely theres ways to simplify"; target set to 300 B.
+- Root cause: predictors are linear, so curvature only comes from tables of slopes, and each
+  distinct multi-hundred constant costs ~2 B. The mask alone was ~+170..230 B.
+
+## 2026-09-04 01:00 — generator rewrite + golf (LESSONS)
+- Rewrote gen_text_tree.py around a tree DSL; every channel is one function. Measured variants:
+  32 glyphs pixel-lookup 361 B, rows-lookup 325 B; 16 glyphs rows-lookup 268 B.
+- Merged xm/ym into one counter cc = 32*xm + ym (-6 B header); sample V at xm == 1 (no x offset,
+  no partial-cell test); RCT 3 greyscale (G = B = Set 0); Rule 30 with on = 1024 so Weyl seed rows
+  need no threshold row; PrevAbs single-test band gate.
+- MISTAKE: first 2-opt optimiser (single start) gave a worse order than before (297 vs 287 nodes);
+  fixed with random restarts. MISTAKE: doctest for chord_slopes had the wrong expected splits.
+- MISTAKE: polygon field used +1 between the loop centres (sign of `-default`), so only the left
+  loop rendered; caught by the montage VLM check, fixed to `default`.
+- Charset local search (must keep A E I O): most-frequent letters cost 32 row transitions, the set
+  "ABDEFHIKNOPRTUV" costs 24 -> text_infinity 302 -> 287 B (diamonds).
+- Final: text.tree 334 B (32 glyphs), text_infinity.tree 296 B (16 glyphs, hexagon loops).
+
+## 2026-09-04 01:40 — first-line echoes and the flip (LESSON)
+- Even 28 rows below the seed, the first text line echoed runs 55 cells apart. Math: on the 16-px
+  sample lattice a Weyl seed with any odd step has a near-return with only 16/1024 phase error
+  (~3% of bits differ) at some distance <= 63 cells (pigeonhole), so the choice of step cannot fix
+  it; only more Rule-30 steps can (P(echo) ~ 0.97^(window) — 34% at 28 rows, ~12% at 60 rows).
+- Fix: blank the first band (2 nodes) so the first drawn line is 60 steps below the seed, and
+  `Orientation 4` (vertical flip) so the spare 64 px margin shows at the bottom.
+- MISTAKE: the flip also flipped the glyphs (upside-down letters in the VLM check); fixed by
+  emitting the font rows reversed in decode space (`decoded_glyph`).
+- MISTAKE: moving Y_OFFSET to 52 made the counter start negative and would not have skipped a
+  band anyway (bands are periodic in the counter); a band can only be blanked explicitly.
