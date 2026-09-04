@@ -93,10 +93,11 @@ def rendered_lines(piece):
     px = max_channel(im).load()
     bands, glyph_y0 = LAYOUT.get(piece, (range(1, 32), gen.GLYPH_Y0))
     lines = []
-    for group_x0 in range(0, im.width, 1024):
+    for group_y0 in range(0, im.height, 1024):
+      for group_x0 in range(0, im.width, 1024):
         for k in bands:
-            y0 = gen.Y_OFFSET + 32 * k
-            if y0 + 32 <= 1024:
+            y0 = group_y0 + gen.Y_OFFSET + 32 * k
+            if y0 + 32 <= group_y0 + 1024:
                 line = "".join(read_cell(px, group_x0 + 16 * i, y0, glyph_y0) for i in range(64)).rstrip()
                 if line:
                     lines.append(line)

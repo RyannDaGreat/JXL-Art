@@ -73,7 +73,8 @@ FLIP = True                            # Orientation 4 (vertical flip): the spar
 BLANK = -1                             # V value of a blank cell (any negative value)
 CA_ON, CA_THRESHOLD = 1024, 511        # Rule-30 "on" value and the test "> 511" used everywhere
 WEYL_MOD, WEYL_STEPS = 1024, (633, 411)   # seed sequences v = (v + step) mod 1024; one step per group
-GROUP, FIRST_GROUP = 1024, 21          # JPEG XL group width and the id of the first group
+GROUP, FIRST_GROUP = 1024, 21          # JPEG XL group width and the id of the first group (ids follow in raster order)
+SEED_SHIFT = 37                        # with > 2 groups, group k starts its seed row 37 * k values along the Weyl sequence (odd: never a whole cell)
 WHITE = 255
 OPTIMIZER_RESTARTS = 40
 
@@ -293,24 +294,32 @@ def weyl(pred, step):
     return If(pred, WEYL_MOD - step - 1, Leaf(pred, step - WEYL_MOD), Leaf(pred, step))
 
 
-def rule30(two_groups):
+def rule30(n_groups=1):
     """
     Pure function. Rule 30 (new = NW xor (N or NE)) with on = CA_ON = 1024. Row 0 and column 0
     are Weyl sequences (period > width, so nothing repeats; the column one injects entropy at
     the left edge because Rule 30 only moves information rightward well and a fixed edge goes
     periodic). Their values 0..1023 feed the rule directly through the same "> 511" thresholds.
-    NW and NE are recovered from the NW-N and N-NE properties given N. With two groups the
-    second group's seed row uses a different step so the halves are not copies.
+    NW and NE are recovered from the NW-N and N-NE properties given N. Every decoder group
+    re-seeds at its own corner, so with two groups the second group's seed row uses a different
+    step, and with more each group k starts the row SEED_SHIFT * k values further along it.
 
     Examples:
-        >>> render(rule30(False)).splitlines()[0]
+        >>> render(rule30(1)).splitlines()[0]
         'if y > 0'
+        >>> render(rule30(3)).splitlines()[-9:-6]
+        ['  if x > 0', '    if W > 390', '      - W -391']
     """
     on, off = Set(CA_ON), Set(0)
     interior = If("N", CA_THRESHOLD,
                   If("NW-N", -CA_ON + CA_THRESHOLD, off, on),
                   If("NW-N", CA_THRESHOLD, If("N-NE", -CA_THRESHOLD - 1, on, off), If("N-NE", -CA_THRESHOLD - 1, off, on)))
-    seed_row = per_group(two_groups, weyl("W", WEYL_STEPS[0]), weyl("W", WEYL_STEPS[1]))
+    if n_groups > 2:
+        corner = lambda k: (k * SEED_SHIFT + 1) * WEYL_STEPS[0] % WEYL_MOD
+        corners = chain("g", [(FIRST_GROUP + k - 1, Set(corner(k))) for k in range(n_groups - 1, 0, -1)], Set(corner(0)))
+        seed_row = If("x", 0, weyl("W", WEYL_STEPS[0]), corners)
+    else:
+        seed_row = per_group(n_groups == 2, weyl("W", WEYL_STEPS[0]), weyl("W", WEYL_STEPS[1]))
     return If("y", 0, If("x", 0, interior, weyl("N", WEYL_STEPS[0])), seed_row)
 
 
@@ -1016,14 +1025,14 @@ def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0
     else:
         dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
         order = best_order(EQ_GLYPHS, dist)
-    two_groups = canvas[0] > GROUP
+    n_groups = -(-canvas[0] // GROUP) * -(-canvas[1] // GROUP)
     line_cells = min(canvas[0], GROUP) // CELL_W - gap
     first_line_y = Y_OFFSET + CELL_H            # the first band is blank (too close to the seed row)
 
     spaced = inline and row_gap > 0
     names = ["cc", "A", "V"] + (["RT"] if not inline or spaced else []) + ["S", "T", "P"] + (["K"] if inline else ["sl", "C"] if crt else []) + ["R", "G", "B"]
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
-    trees = {"cc": cell_counter(), "A": rule30(two_groups)}
+    trees = {"cc": cell_counter(), "A": rule30(n_groups)}
     trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0)
     if not inline:
         trees["RT"] = eq_row_type(prev("RT", "cc"))
@@ -1100,7 +1109,7 @@ def build_piece(charset, mask, canvas, crt=False):
         trees["S"] = lemniscate_field(canvas)
         trees["L"] = xband_field(canvas)
     trees["cc"] = cell_counter()
-    trees["A"] = rule30(two_groups)
+    trees["A"] = rule30(2 if two_groups else 1)
     gate = lemniscate_gate(canvas, prev("V", "S"), prev("V", "L")) if mask else None
     trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
     trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"), early=1 if crt else 0)

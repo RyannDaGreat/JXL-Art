@@ -229,3 +229,13 @@
   scale). Tall parens can only extend below the decision row, so v4 decides tokens at row 19 of the
   odd band and draws in the even band plus the top of the next odd band; the frame is centred so
   parens grow symmetrically around the text.
+
+## 2026-09-04 10:40 — v4 at 4K
+- User: "plz make it 4k (i.e. more equations same relative size same filesize)". Measured with a
+  g-reading debug tree: ids 21..24 / 25..28 for 4096x2048, +15 B for 8 groups vs 2. Chose
+  4096x2048 over 3840x2160 (partial groups break the grammar's forced closes and clip parens).
+  Per-group seeds via a chain over g; the two-group pieces keep their old seeding (bytes unchanged).
+- First 4K build: 7 of 8 tiles identical and degenerate ("3^3^3^..."): the seed row's x split had
+  its branches swapped (If takes `then` when prop > split), so x > 0 got the constant corner value.
+  Caught by the pairwise tile comparison, not by the grammar verifier (a constant CA still yields
+  well-formed equations). Lesson: always check tiles pairwise when adding groups.
