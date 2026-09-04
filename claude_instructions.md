@@ -146,6 +146,21 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 
 > "add a lil chromatic abberatin plz"
 
+> "actually, why don't we take that equation generator and turn it into a madlibs-style thing generate a
+> bunch of grammars that make sentences and then randomly generate pseudo-intellectual philosophical
+> quotes"
+
+> "i dont care about teh crommatic abberation anymire"
+
+> "well ur taking a long time. thats fine. but imma go to sleep so notify me when ur done" ... "plz do take
+> ur time" ... "do it right" ... "go on"
+
+> "to really hammer home how it's auto-generating them, let's see if we can make the pixel font 1px-per-pixel
+> insted of the ~`12x20 it is now per character (i.e. 4x smaller, smaller gaps between lines, more quotes,
+> bigger vocab)."
+
+> "fork a subagent to do the prime thing"
+
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
 installs that leave no trace in the dump. Top level therefore holds `setup.sh` next to the manifest.
@@ -331,6 +346,41 @@ and B = R + 60, the rim gets none) so green and blue extend one pixel to the rig
 fringe on the left edge and a cyan-green one on the right, one pixel wide (a quarter of a glyph
 pixel). text_infinity_v2 keeps rim class 2 and its bytes.
 
+### quotes — quotes.tree (SIZE B)
+Generate with `--quotes --pixel 1` (2048x1024). User: "why don't we take that equation generator and
+turn it into a madlibs-style thing generate a bunch of grammars that make sentences and then randomly
+generate pseudo-intellectual philosophical quotes", then "make the pixel font 1px-per-pixel insted of the
+~12x20 it is now per character (i.e. 4x smaller, smaller gaps between lines, more quotes, bigger vocab)".
+Look: a wall of tiny parchment-coloured quotes, e.g. "THE SILENT MIND DEVOURS EVERY TRUTH OF THE SOUL."
+Geometry (`apply_geometry(1)`, GEOMETRY table): PIXEL 1, cells 4x10 (glyph 3x5 at xm 1..3, ym 5..9),
+V sampled in column xm 0 rows 0..4, decision row 4. Sampling at xm 0 is fine here because the first
+cell of every line is the fixed opening quote, so the seed column's non-random bits are never used.
+Rows are 10 px apart (5 px glyph + 5 px gap); the first 6 bands (60 rows below the seed row) are blank.
+Slots: a slot counter channel Q (px within a 64-cell slot, 256 px, 4 slots per group line, 8 per
+2048-px row) restarts a quote at every slot start; the last QUOTE_MARGIN cells of a slot are never
+written. Every group line therefore holds 4 quotes, 94 lines per group: ~750 quotes.
+Grammar (regular, over classes): " DET (ADJ)? NOUN ((VERB | PREP) DET (ADJ)? NOUN)* ." with the
+choices made at the last letter of a word (so the full stop follows the noun directly) or at the
+blank cell after it (a negative marker: NEEDS_DET, NEEDS_ADJ, NEEDS_NOUN, AFTER_NOUN; END sticks):
+- DET's last letter: V > QUOTE_ADJ_V (about 1 in 3) -> NEEDS_ADJ else NEEDS_NOUN; ADJ's last letter ->
+  NEEDS_NOUN; VERB/PREP -> NEEDS_DET (one shared marker, so VERB and PREP words can be one table
+  group); NOUN's last letter: before QUOTE_MIN_CELLS of the slot it always continues, else it ends
+  (writes ".") when V > QUOTE_END_V (1 in 2); the full stop's end is the closing quote, whose end is END.
+- Marker moves (`v_pick`: 32 V values split by weight): NEEDS_DET -> DET words (THE 3x), NEEDS_ADJ ->
+  ADJ words, NEEDS_NOUN -> NOUN words, AFTER_NOUN -> VERB (weight 3, IS 2x) or PREP (1, OF 2x) words.
+  Deciding "adjective or not" at the determiner's last letter is what lets each word list appear once.
+State channel S = QUOTE_POS * pos + w while spelling (advance W + QUOTE_POS); the vocabulary is sorted
+by length then class so the last-letter table is one entry per (length, move) range. Token channel T:
+one runs_tree per position over the sorted words (don't-care positions filled to merge runs), BLANK
+for S < 0. P, R, G, B as the text pieces (QUOTE_COLOUR parchment via RCT 3 deltas).
+Line-end zones (quote_zones, from the word lengths, cells left including the current one): NOUN's last
+letter <= zone_end ends; DET's last letter <= zone_det takes no adjective; NEEDS_NOUN <= zone_short picks
+a 4-letter noun (QUOTE_SHORT_NOUNS); NEEDS_DET <= zone_the writes THE. Derived so that every free choice
+leaves a state that can still finish with ." inside the slot (see the docstring).
+Byte budget: the letter table costs ~2 nodes per letter, so the vocabulary is what the budget allows
+(QUOTE_WORDS, all words <= 7 letters, 18 letters + 2 marks as glyphs). Verified by
+`art/experiments/verify_quotes.py` (reads every slot back, checks the class regex, prints word usage).
+
 ### equations — equations.tree (556 B), equations_crt.tree (625 B), equations_v2.tree (705 B), equations_v3.tree (652 B), equations_v4.tree (840 B)
 Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 1 --random_length` (v2) and
 `--equations --inline --width 1024 --name equations_v3` (v3) and
@@ -415,7 +465,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Twelve `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Thirteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 

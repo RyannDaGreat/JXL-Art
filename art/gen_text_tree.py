@@ -53,7 +53,7 @@ FONT = {  # 3x5 glyphs, 5 rows of 3 bits
     "Y": ["101", "101", "010", "010", "010"], "Z": ["111", "001", "010", "100", "111"],
     "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"],
     "2": ["111", "001", "111", "100", "111"], "!": ["010", "010", "010", "000", "010"],
-    "?": ["110", "001", "010", "000", "010"], ".": ["000", "000", "000", "000", "010"],
+    "?": ["110", "001", "010", "000", "010"], ".": ["000", "000", "000", "000", "010"], '"': ["101", "101", "000", "000", "000"],
     ",": ["000", "000", "000", "010", "100"], "{": ["011", "010", "110", "010", "011"],
     "}": ["110", "010", "011", "010", "110"], "(": ["010", "100", "100", "100", "010"],
     ")": ["010", "001", "001", "001", "010"], "+": ["000", "010", "111", "010", "000"], " ": ["000"] * 5,
@@ -67,6 +67,10 @@ GLYPH_ROWS, GLYPH_COLS, PIXEL = 5, 3, 4
 GLYPH_X0, GLYPH_Y0 = 2, 12
 SAMPLE_X = 1                           # column where V is assembled (x = 1 + 16k, past the CA's edge column)
 CELL_W, CELL_H = 16, 32
+GEOMETRY = {                           # cell layouts by glyph pixel size (apply_geometry); 1 px: glyph at xm 1..3, ym 5..9
+    4: dict(PIXEL=4, CELL_W=16, CELL_H=32, GLYPH_X0=2, GLYPH_Y0=12, SAMPLE_X=1),
+    1: dict(PIXEL=1, CELL_W=4, CELL_H=10, GLYPH_X0=1, GLYPH_Y0=5, SAMPLE_X=0),
+}
 Y_OFFSET = 20                          # first cell band (bands repeat every CELL_H rows from here)
 BLANK_BANDS = 1                        # leading bands left blank: first drawn line is 60 Rule-30 steps from the seed
 FLIP = True                            # Orientation 4 (vertical flip): the spare margin shows at the bottom
@@ -87,6 +91,20 @@ ABERRATION_RIM = 4                     # rim gets its own class (the plain CRT t
 ABERRATION_G = (-8, -30, 95, None, -255)      # G = R + delta by class; None = the lit word tones (CRT_AMBER_G)
 ABERRATION_B = (-255, -255, 60, -255, -255)   # B = R + delta by class: only the right fringe gets blue
 OPTIMIZER_RESTARTS = 40
+
+
+def apply_geometry(pixel):
+    """
+    Command (rebinds the module's cell-geometry globals). Selects GEOMETRY[pixel]; every channel
+    builder reads the globals when called, so call this before building a piece.
+
+    Examples:
+        >>> apply_geometry(1); render(cell_counter()).splitlines()[1]     # last column = CELL_H * (CELL_W - 1)
+        '  if W > 29'
+        >>> apply_geometry(4); render(cell_counter()).splitlines()[1]
+        '  if W > 479'
+    """
+    globals().update(GEOMETRY[pixel])
 
 # ---------------------------------------------------------------- tree DSL (pure functions)
 
@@ -194,24 +212,43 @@ def chain(prop, cases, default):
     return tree
 
 
-def runs_tree(values, leaf_of, prop="Prev"):
+def runs_tree(values, leaf_of, prop="Prev", offset=0):
     """
-    Pure function. Balanced tree over an index (property `prop`) selecting leaf_of(values[i]);
-    one split per run boundary of equal consecutive values.
+    Pure function. Balanced tree over an index (property `prop` minus `offset`) selecting
+    leaf_of(values[i]); one split per run boundary of equal consecutive values.
 
     Examples:
         >>> print(render(runs_tree([1, 1, 0, 0], lambda v: Set(v))))
         if Prev > 1
           - Set 0
           - Set 1
+        >>> render(runs_tree([1, 0], Set, "W", offset=64)).splitlines()[0]
+        'if W > 64'
     """
     def build(lo, hi):
         boundaries = [i for i in range(lo, hi) if values[i] != values[i + 1]]
         if not boundaries:
             return leaf_of(values[lo])
         b = boundaries[len(boundaries) // 2]
-        return If(prop, b, build(b + 1, hi), build(lo, b))
+        return If(prop, offset + b, build(b + 1, hi), build(lo, b))
     return build(0, len(values) - 1)
+
+
+def fill_dont_care(values):
+    """
+    Pure function. Replaces None entries by the previous defined value (leading ones by the first
+    defined value) so that runs_tree merges them into neighbouring runs.
+
+    Examples:
+        >>> fill_dont_care([None, None, 3, None, 5])
+        [3, 3, 3, 3, 5]
+    """
+    first = next(v for v in values if v is not None)
+    out, last = [], first
+    for v in values:
+        last = last if v is None else v
+        out.append(last)
+    return out
 
 
 def dispatch(channel_trees):
@@ -863,6 +900,21 @@ def eq_row_type(prev_cc, period=EQ_ROWS, init=EQ_RT_INIT):
     return If("x", 0, Leaf("W", 0), If("y", 0, If(prev_cc, 0, Leaf("N", 0), step), Set(init)))
 
 
+def cell_decision(prev_cc, decide_row, decide, line_start):
+    """
+    Pure function. A once-per-cell channel: `decide` at (SAMPLE_X, decide_row), copied right (W)
+    and down (N) through the cell; `line_start` in the x == 0 column.
+
+    Examples:
+        >>> render(cell_decision("Prev", 11, Set(1), Set(0))).splitlines()[0]
+        'if x > 0'
+    """
+    sample = If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0),
+                If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row - 1), decide, Leaf("N", 0)))
+    cell = chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), sample)], Leaf("W", 0))
+    return If("x", 0, cell, line_start)
+
+
 def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev_rt=None, random_length=False,
              one_equals=False, tall=False):
     """
@@ -1124,6 +1176,237 @@ HiddenChannel {len(names) - 3}
     return header + render(tree) + "\n", names, order
 
 
+# ---------------------------------------------------------------- pseudo-profound quotes (a madlibs grammar)
+# A wall of quotes such as "THE SILENT MIND DEVOURS EVERY TRUTH OF THE SOUL." Each 64-cell slot of a
+# line (slot counter channel Q) holds one quote. A regular grammar over word classes makes the
+# choices with the 5-bit value V, either at the last letter of a word (adjective or not after a
+# determiner; end or not after a noun, so the full stop follows the noun directly) or at the blank
+# cell after it, which holds a negative marker saying which class comes next. The state channel S
+# is QUOTE_POS * pos + word while spelling (advance = W + QUOTE_POS); the vocabulary is sorted by
+# length then class so the last-letter table is one entry per (length, move) range, and every word
+# list appears once. Near the slot end the choices are forced (quote_zones) so the quote closes
+# with ." in time. The token channel maps (pos, word) to a letter with one runs_tree per position.
+QUOTE_WORDS = {                          # class -> {word: weight}; words <= 7 letters (QUOTE_POS positions)
+    "DET": {"THE": 4, "EVERY": 1, "NO": 1, "EACH": 1},
+    "ADJ": {"SILENT": 1, "ETERNAL": 1, "HIDDEN": 1, "TRUE": 1, "SACRED": 1, "INNER": 1, "MORTAL": 1, "EMPTY": 1,
+            "HOLLOW": 1, "DIVINE": 1, "FRAGILE": 1, "BROKEN": 1, "SECRET": 1},
+    "NOUN": {"MIND": 1, "SOUL": 1, "TRUTH": 1, "TIME": 1, "VOID": 1, "DREAM": 1, "SELF": 1, "CHAOS": 1,
+             "ORDER": 1, "DEATH": 1, "SILENCE": 1, "DESIRE": 1, "FATE": 1, "LOVE": 1, "LIGHT": 1, "FEAR": 1,
+             "WISDOM": 1, "SPIRIT": 1, "NATURE": 1, "REASON": 1, "BEAUTY": 1, "SHADOW": 1},
+    "VERB": {"IS": 3, "CREATES": 1, "DENIES": 1, "DEVOURS": 1, "DEFINES": 1, "REVEALS": 1, "HAUNTS": 1, "MIRRORS": 1,
+             "BECOMES": 1, "FORGETS": 1, "SEEKS": 1, "FEARS": 1, "ESCAPES": 1, "BETRAYS": 1},
+    "PREP": {"OF": 3, "BEYOND": 1, "INSIDE": 1, "BEFORE": 1, "WITHOUT": 1, "WITHIN": 1, "BENEATH": 1},
+}
+QUOTE_NEXT = {"VERB": 3, "PREP": 1}      # what follows a noun that does not end the quote (class weights)
+QUOTE_ADJ_V = 21                         # at a determiner's last letter, V > 21 puts an adjective next (10 of 32)
+QUOTE_END_V = 15                         # at a noun's last letter (past QUOTE_MIN_CELLS), V > 15 ends the quote
+QUOTE_SHORT_NOUNS = ("MIND", "SOUL", "TIME", "LOVE")   # 4-letter nouns forced near the slot end
+QUOTE_MARKS = {"OPEN": '"', "DOT": ".", "CLOSE": '"'}  # one-letter words: opening quote, full stop, closing quote
+QUOTE_POS = 64                           # S = QUOTE_POS * position + word index (> number of words)
+QUOTE_SLOT_CELLS, QUOTE_MARGIN = 64, 2   # cells per quote slot; trailing cells never written
+QUOTE_MIN_CELLS = 20                     # a quote never ends before this many cells of its slot
+QUOTE_SEED_ROWS = 60                     # blank rows under the seed row before the first line (Rule 30 echoes)
+QUOTE_COLOUR = (240, 220, 180)           # parchment on black
+QUOTE_END, QUOTE_MARKERS = -1, ("NEEDS_DET", "NEEDS_ADJ", "NEEDS_NOUN", "AFTER_NOUN")   # S < 0: END, then -2, -3, ...
+V_RANGE = 32                             # values of the 5-bit V
+
+
+def quote_vocab():
+    """
+    Pure function. [(word, class)] sorted by length then class order (QUOTE_WORDS classes, then
+    OPEN DOT CLOSE), so every (length, class) group is one contiguous index range.
+
+    Examples:
+        >>> quote_vocab()[:5]
+        [('"', 'OPEN'), ('.', 'DOT'), ('"', 'CLOSE'), ('NO', 'DET'), ('IS', 'VERB')]
+    """
+    classes = list(QUOTE_WORDS) + list(QUOTE_MARKS)
+    words = [(w, c) for c, ws in QUOTE_WORDS.items() for w in ws] + [(w, c) for c, w in QUOTE_MARKS.items()]
+    assert len(words) < QUOTE_POS and all(len(w) <= 7 for w, _ in words)
+    return sorted(words, key=lambda wc: (len(wc[0]), classes.index(wc[1])))
+
+
+def quote_zones():
+    """
+    Pure function. (zone_short, zone_the, zone_det, zone_end) in cells left, the current cell
+    included: a NEEDS_NOUN marker with <= zone_short cells picks a short noun (any noun needs
+    marker + big + ending); NEEDS_DET with <= zone_the writes THE (a free determiner needs det_max
+    more cells than that path); a determiner's last letter with <= zone_det takes no adjective
+    (marker + adjective + marker + short noun + ending); a noun's last letter with <= zone_end
+    ends (continuing costs marker + verb + the THE path).
+
+    Examples:
+        >>> quote_zones()
+        (9, 12, 15, 19)
+    """
+    ending = 2                                            # ." after the last letter
+    big = max(len(w) for c in ("ADJ", "NOUN", "VERB", "PREP") for w in QUOTE_WORDS[c])
+    det_max, short = max(len(w) for w in QUOTE_WORDS["DET"]), max(len(w) for w in QUOTE_SHORT_NOUNS)
+    the_path = 1 + len("THE") + 1 + short + ending          # NEEDS_DET marker, THE, marker, short noun, ."
+    return 1 + big + ending - 1, the_path + det_max - len("THE") - 1, 1 + big + 1 + short + ending, 1 + big + the_path
+
+
+def v_pick(prev_v, weighted):
+    """
+    Pure function. Chain over V choosing among (weight, subtree) options with V_RANGE values
+    split proportionally to the weights (every option gets at least one).
+
+    Examples:
+        >>> print(render(v_pick("Prev", [(3, Set(0)), (1, Set(1))])))
+        if Prev > 23
+          - Set 1
+          - Set 0
+    """
+    total = sum(w for w, _ in weighted)
+    raw = [w / total * V_RANGE for w, _ in weighted]
+    counts = [max(1, int(r)) for r in raw]
+    while sum(counts) < V_RANGE:
+        counts[max(range(len(raw)), key=lambda i: raw[i] - counts[i])] += 1
+    while sum(counts) > V_RANGE:
+        counts[max(range(len(raw)), key=lambda i: (counts[i] > 1, counts[i] - raw[i]))] -= 1
+    bounds = [sum(counts[:k + 1]) for k in range(len(counts))]
+    return chain(prev_v, [(bounds[k - 1] - 1, tree) for k, (_, tree) in reversed(list(enumerate(weighted))) if k > 0], weighted[0][1])
+
+
+def slot_counter(slot_px):
+    """
+    Pure function. Q channel: pixel index within the current slot, 0 .. slot_px - 1, along each row.
+
+    Examples:
+        >>> print(render(slot_counter(256)))
+        if x > 0
+          if W > 254
+            - Set 0
+            - W 1
+          - Set 0
+    """
+    return If("x", 0, If("W", slot_px - 2, Set(0), Leaf("W", 1)), Set(0))
+
+
+def quote_state(prev_v, prev_q, prev_cc, decide_row, line_cells, first_line_y):
+    """
+    Pure function. State channel S of the quotes piece (see the section comment). Slot starts
+    (Q == 0, including x == 0) write the opening quote; above `first_line_y` everything is END.
+
+    Examples:
+        >>> render(quote_state("Prev", "Prev2", "Prev3", 11, 62, 52)).splitlines()[0]
+        'if x > 0'
+    """
+    vocab = quote_vocab()
+    idx = {wc: i for i, wc in enumerate(vocab)}
+    word = lambda w, c: Set(idx[(w, c)])
+    marker = {name: QUOTE_END - 1 - k for k, name in enumerate(QUOTE_MARKERS)}
+    zone_short, zone_the, zone_det, zone_end = quote_zones()
+    left_le = lambda k, then, other: If(prev_q, CELL_W * (line_cells - k) - 1, then, other)   # cells left <= k
+    pick = lambda triples: v_pick(prev_v, [(wt, word(w, c)) for w, c, wt in triples])
+    class_pick = lambda c: pick([(w, c, wt) for w, wt in QUOTE_WORDS[c].items()])
+    dot = word(QUOTE_MARKS["DOT"], "DOT")
+
+    after_noun = pick([(w, c, QUOTE_NEXT[c] * wt / sum(QUOTE_WORDS[c].values())) for c in QUOTE_NEXT for w, wt in QUOTE_WORDS[c].items()])
+    moves = {"NEEDS_DET": left_le(zone_the, word("THE", "DET"), class_pick("DET")),
+             "NEEDS_ADJ": class_pick("ADJ"),
+             "NEEDS_NOUN": left_le(zone_short, pick([(w, "NOUN", 1) for w in QUOTE_SHORT_NOUNS]), class_pick("NOUN")),
+             "AFTER_NOUN": after_noun}
+    needs = lambda name: Set(marker[name])
+    ends = {"OPEN": class_pick("DET"),
+            "DET": left_le(zone_det, needs("NEEDS_NOUN"), If(prev_v, QUOTE_ADJ_V, needs("NEEDS_ADJ"), needs("NEEDS_NOUN"))),
+            "ADJ": needs("NEEDS_NOUN"),
+            "NOUN": If(prev_q, CELL_W * QUOTE_MIN_CELLS - 1,
+                       left_le(zone_end, dot, If(prev_v, QUOTE_END_V, dot, needs("AFTER_NOUN"))), needs("AFTER_NOUN")),
+            "VERB": needs("NEEDS_DET"), "PREP": needs("NEEDS_DET"),
+            "DOT": word(QUOTE_MARKS["CLOSE"], "CLOSE"), "CLOSE": Set(QUOTE_END)}
+
+    cases = []                           # (lowest W of the range, move): last letters -> ends, longer words -> advance
+    lengths = [len(w) for w, _ in vocab]
+    for p in range(max(lengths)):
+        group = [i for i in range(len(vocab)) if lengths[i] == p + 1]
+        i = group[0] if group else None
+        while i is not None and i <= group[-1]:
+            j = i
+            while j <= group[-1] and ends[vocab[j][1]] is ends[vocab[i][1]]:
+                j += 1
+            cases.append((QUOTE_POS * p + i, ends[vocab[i][1]]))
+            i = j
+        if group and group[-1] + 1 < len(vocab):
+            cases.append((QUOTE_POS * p + group[-1] + 1, Leaf("W", QUOTE_POS)))
+    letters = chain("W", [(lb - 1, move) for lb, move in sorted(cases, key=lambda c: -c[0])], Set(QUOTE_END))
+    markers = chain("W", [(QUOTE_END - 1, Set(QUOTE_END))] + [(marker[n] - 1, moves[n]) for n in QUOTE_MARKERS[:-1]], moves[QUOTE_MARKERS[-1]])
+    open_quote = word(QUOTE_MARKS["OPEN"], "OPEN")
+    decide = If("y", first_line_y - 1, If(prev_q, 0, If("W", QUOTE_END, letters, markers), open_quote), Set(QUOTE_END))
+    return cell_decision(prev_cc, decide_row, decide, If("y", first_line_y - 1, open_quote, Set(QUOTE_END)))
+
+
+def quote_token(order, prev_s, prev_cc, decide_row):
+    """
+    Pure function. Token channel T of the quotes piece: BLANK for S < 0, else the letter of word
+    S % QUOTE_POS at position S // QUOTE_POS (one runs_tree per position; positions past a word's
+    end never occur and are filled to merge runs). The x == 0 column shows the opening quote
+    (its S is that or END), so the first cell of a line is drawn.
+
+    Examples:
+        >>> render(quote_token(sorted({ch for w, _ in quote_vocab() for ch in w}), "Prev", "Prev2", 11)).splitlines()[0]
+        'if x > 0'
+    """
+    vocab = quote_vocab()
+    tables = []
+    for p in range(max(len(w) for w, _ in vocab)):
+        values = fill_dont_care([order.index(w[p]) if p < len(w) else None for w, _ in vocab])
+        tables.append(runs_tree(values, Set, prev_s, offset=QUOTE_POS * p))
+    table = chain(prev_s, [(QUOTE_POS * p - 1, tables[p]) for p in range(len(tables) - 1, 0, -1)], tables[0])
+    decide = If(prev_s, QUOTE_END, table, Set(BLANK))
+    at_x0 = If(prev_s, QUOTE_END, Set(order.index(QUOTE_MARKS["OPEN"])), Set(BLANK))   # S there is the opening quote or END
+    return cell_decision(prev_cc, decide_row, decide, at_x0)
+
+
+def build_quotes(canvas, name="quotes"):
+    """
+    Pure function. (tree source, channel names, glyph order) for the quotes piece at the current
+    geometry: QUOTE_SLOT_CELLS-cell slots along each row, one quote per slot.
+
+    Examples:
+        >>> build_quotes((2048, 1024))[1]
+        ['cc', 'A', 'V', 'Q', 'S', 'T', 'P', 'R', 'G', 'B']
+    """
+    bits = 5
+    decide_row = GLYPH_Y0 - 1
+    sample_y0 = decide_row - bits + 1
+    n_groups = -(-canvas[0] // GROUP) * -(-canvas[1] // GROUP)
+    slot_px = QUOTE_SLOT_CELLS * CELL_W
+    assert GROUP % slot_px == 0 and sample_y0 >= 0
+    line_cells = QUOTE_SLOT_CELLS - QUOTE_MARGIN
+    first_line_y = Y_OFFSET + CELL_H * -(-QUOTE_SEED_ROWS // CELL_H)
+    glyphs = sorted({ch for w, _ in quote_vocab() for ch in w})
+    dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
+    order = best_order(glyphs, dist)
+
+    names = ["cc", "A", "V", "Q", "S", "T", "P", "R", "G", "B"]
+    prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
+    trees = {"cc": cell_counter(), "A": rule30(n_groups), "Q": slot_counter(slot_px)}
+    trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0)
+    trees["S"] = quote_state(prev("S", "V"), prev("S", "Q"), prev("S", "cc"), decide_row, line_cells, first_line_y)
+    trees["T"] = quote_token(order, prev("T", "S"), prev("T", "cc"), decide_row)
+    trees["P"] = pattern_channel(order, prev("P", "T"), prev("P", "cc"), flip=False)
+    trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"), on=Set(QUOTE_COLOUR[0]))
+    trees["G"], trees["B"] = Set(QUOTE_COLOUR[1] - QUOTE_COLOUR[0]), Set(QUOTE_COLOUR[2] - QUOTE_COLOUR[0])
+    tree = simplify(dispatch([trees[n] for n in names]))
+    n_words = len(quote_vocab()) - len(QUOTE_MARKS)
+    header = f"""/* {name}.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.
+   {canvas[0]}x{canvas[1]}: pseudo-profound quotes from a madlibs grammar over {n_words} words, {PIXEL} px per glyph
+   pixel, cells {CELL_W}x{CELL_H}, one quote per {QUOTE_SLOT_CELLS}-cell slot. S = {QUOTE_POS}*pos + word while spelling,
+   a class marker on the blank after a word, {QUOTE_END} when done; the marker cell's successor picks the next
+   word from V. Glyph order: {"".join(order)!r}
+   Channels: {", ".join(f"c{i} {n}" for i, n in enumerate(names))}
+     cc cell counter; A Rule 30; V 5 random bits; Q slot pixel counter; S state; T glyph index;
+     P glyph-row pattern; R glyph pixels ({QUOTE_COLOUR[0]}); G and B are RCT 3 deltas for {QUOTE_COLOUR}.
+   Nodes: {count_nodes(tree)} */
+Width {canvas[0]}
+Height {canvas[1]}
+RCT 3
+HiddenChannel {len(names) - 3}
+"""
+    return header + render(tree) + "\n", names, order
+
+
 # ---------------------------------------------------------------- assembling a piece
 
 
@@ -1216,7 +1499,7 @@ HiddenChannel {len(names) - 3}
 
 
 def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0, row_gap=0,
-             random_length=False, one_equals=False, tall_parens=False, logo=False):
+             random_length=False, one_equals=False, tall_parens=False, logo=False, quotes=False, pixel=4):
     """
     Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree / equations.tree);
     prints node count. Default canvas: 1024x1024 without a mask, 2048x1024 with one or for equations.
@@ -1227,14 +1510,19 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         >>> # generate(mask="lemniscate", crt=True, name="text_infinity_v2")   -> CRT look
         >>> # generate(mask="lemniscate", logo=True)                            -> jxl_rs.tree (spells JXL-RS)
         >>> # generate(mask="lemniscate", logo=True, crt=True)                  -> jxl_rs_crt.tree (amber terminal)
+        >>> # generate(quotes=True, pixel=1)                                     -> quotes.tree (madlibs quotes, 1 px font)
         >>> # generate(equations=True)                                         -> equations.tree
         >>> # generate(equations=True, inline=True, gap=12, row_gap=1, random_length=True)  -> equations_v2.tree (two per row)
         >>> # generate(equations=True, inline=True, width=1024, name="equations_v3")  -> one equation per line
         >>> # generate(equations=True, inline=True, gap=12, row_gap=1, random_length=True, one_equals=True, tall_parens=True, name="equations_v4")
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
-    canvas = (width or (2 * GROUP if (mask or equations) else GROUP), height)
-    if equations:
+    canvas = (width or (2 * GROUP if (mask or equations or quotes) else GROUP), height)
+    apply_geometry(pixel)
+    if quotes:
+        src, names, order = build_quotes(canvas, name or "quotes")
+        default_name = "quotes"
+    elif equations:
         src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap, random_length, one_equals, tall_parens)
         default_name = "equations" + ("_v2" if inline else "_crt" if crt else "")
     else:

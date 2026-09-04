@@ -256,3 +256,21 @@
   so a real shift is impossible; instead the glow class (which already encodes "pixel before lit"
   and "pixels after lit") drives per-channel brightness: red full on the rim, green/blue full on the
   first trail pixel. Rim became class 4 to tell it from the first trail pixel (both were 2).
+
+## 2026-09-04 12:30 — quotes (madlibs grammar)
+- User: "take that equation generator and turn it into a madlibs-style thing ... randomly generate
+  pseudo-intellectual philosophical quotes"; "do it right"; notify when done. Budget analysis: the
+  letter table costs ~2 nodes per letter (~2.8 B), the grammar ~100 nodes, glyphs ~130, so the
+  vocabulary is limited to ~35 words of <= 7 letters. Word ends are one (length, class) table
+  because the vocabulary is sorted by length then class; the blank cell between words carries a
+  class marker so each grammar edge stores its target word list once.
+- The fork session's worktree (.claude/worktrees/primes) got committed as an embedded repo by
+  `git add -A`; removed from the index and ignored.
+
+## 2026-09-04 13:30 — quotes v2 (1 px font)
+- First build (PIXEL 4, one quote per line, 977 B) rendered "DEATH ." because the full stop was
+  chosen at the blank marker cell; v2 decides it at the noun's last letter. User then asked for a
+  1-px font, tighter lines, more quotes and a bigger vocabulary: geometry made switchable
+  (apply_geometry), slots of 64 cells with a slot counter channel, VERB/PREP share a marker, and the
+  adjective decision moved to the determiner's last letter so each word list is stored once.
+- Forked a subagent for the primes piece (user: "fork a subagent to do the prime thing").
