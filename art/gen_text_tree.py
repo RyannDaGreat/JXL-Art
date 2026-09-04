@@ -593,14 +593,11 @@ def lemniscate_gate(canvas, prev_field, prev_xband):
 # Scanlines: a period-SCAN row counter darkens every SCAN-th line of everything. Glow: class
 # channel C is 3 on lit glyph pixels and otherwise the left neighbour minus one, a phosphor
 # trail that fades to the right (2 px), plus a 1 px rim before each lit glyph column; a
-# symmetric halo would need the next cell's value or a second font lookup. Tube: a superellipse
-# field T = 4096 ((|u| / half W)^n + (|v| / half H)^n) grown by chord slopes; brightness is scaled
-# per "radius" band (CRT["vignette"]) and black beyond the last one (rounded monitor corners).
+# symmetric halo would need the next cell's value or a second font lookup.
 # Colour: the R channel holds brightness; RCT 3 makes G = R + PHOSPHOR_G and B = R - 255 (= 0),
-# so bright pixels are amber-yellow and dim ones green; outside the tube R = -PHOSPHOR_G so G = 0.
-CRT = dict(scan=4, dark=0.55, levels=(8, 60, 120, 215), phosphor_g=25, tube_power=3, tube_pieces=(128, 128),
-           vignette=((0.78, 1.0), (0.92, 0.72), (1.06, 0.45)))   # (superellipse radius, brightness factor) bands; black beyond
-TUBE_UNIT = 4096
+# so bright pixels are amber-yellow and dim ones green. (A superellipse tube vignette was tried
+# and removed: banded, not smooth, and ~+120 B; see concerns.md.)
+CRT = dict(scan=4, dark=0.55, levels=(8, 60, 120, 215), phosphor_g=25)
 
 
 def scanline_counter():
@@ -612,34 +609,6 @@ def scanline_counter():
         'if y > 0'
     """
     return If("y", 0, If("N", CRT["scan"] - 2, Set(0), Leaf("N", 1)), Set(0))
-
-
-def tube_field(canvas):
-    """
-    Pure function. Superellipse field T (see above) grown with chord slopes per decoder group.
-
-    Examples:
-        >>> render(tube_field((1024, 1024))).splitlines()[0]
-        'if x > 0'
-    """
-    w, h = canvas
-    px, py = CRT["tube_pieces"]
-    n = CRT["tube_power"]
-    f = lambda u: TUBE_UNIT * (abs(u) / (w / 2)) ** n
-    g = lambda v: TUBE_UNIT * (abs(v) / (h / 2)) ** n
-    cy = h // 2
-    ys = piece_chain("y", "N", chord_pieces(lambda y: g(y - cy), [cy + j * py for j in range(-8, 9)], h))
-
-    def half(centre, size):
-        fx = lambda x: f(x - centre)
-        return piece_chain("x", "W", chord_pieces(fx, [centre + j * px for j in range(-8, 9)], size)), Set(round(fx(0) + g(-cy)))
-
-    if w > GROUP:
-        (xs_l, base_l), (xs_r, base_r) = half(GROUP, GROUP), half(0, w - GROUP)
-        xs, base = per_group(True, xs_l, xs_r), per_group(True, base_l, base_r)
-    else:
-        xs, base = half(w // 2, w)
-    return If("x", 0, xs, If("y", 0, ys, base))
 
 
 def class_channel(prev_pattern, prev_cc):
@@ -667,22 +636,17 @@ def class_channel(prev_pattern, prev_cc):
     return chain(prev_cc, cases, trail)
 
 
-def brightness_channel(prev_class, prev_tube, prev_scan):
+def brightness_channel(prev_class, prev_scan):
     """
-    Pure function. R channel of the CRT look: brightness by glow class, dimmed on dark scanlines
-    and by the vignette band, -PHOSPHOR_G (black after RCT) outside the tube.
+    Pure function. R channel of the CRT look: brightness by glow class, dimmed on dark scanlines.
 
     Examples:
-        >>> render(brightness_channel("Prev", "Prev2", "Prev3")).splitlines()[0]
-        'if Prev2 > 4878'
+        >>> render(brightness_channel("Prev", "Prev2")).splitlines()[0]
+        'if Prev > 2'
     """
     levels = CRT["levels"]
-    def table(factor):
-        per_class = [If(prev_scan, 0, Set(round(v * factor)), Set(round(v * factor * CRT["dark"]))) for v in levels]
-        return chain(prev_class, [(k - 1, per_class[k]) for k in range(len(levels) - 1, 0, -1)], per_class[0])
-    bands = [(round(TUBE_UNIT * radius ** CRT["tube_power"]), factor) for radius, factor in CRT["vignette"]]
-    outer_cases = [(bands[i - 1][0], table(bands[i][1])) for i in range(len(bands) - 1, 0, -1)]
-    return If(prev_tube, bands[-1][0], Set(-CRT["phosphor_g"]), chain(prev_tube, outer_cases, table(bands[0][1])))
+    per_class = [If(prev_scan, 0, Set(v), Set(round(v * CRT["dark"]))) for v in levels]
+    return chain(prev_class, [(k - 1, per_class[k]) for k in range(len(levels) - 1, 0, -1)], per_class[0])
 
 
 # ---------------------------------------------------------------- assembling a piece
@@ -691,14 +655,14 @@ def brightness_channel(prev_class, prev_tube, prev_scan):
 def build_piece(charset, mask, canvas, crt=False):
     """
     Pure function. (tree source text, channel names, character order) for a text piece.
-    crt=True adds scanlines, a phosphor trail glow, a tube vignette and green-amber colour.
+    crt=True adds scanlines, a phosphor trail glow and green-amber colour.
 
     Examples:
         >>> src, names, order = build_piece(CHARSET_16, None, (1024, 1024))
         >>> names
         ['cc', 'A', 'V', 'P', 'R', 'G', 'B']
         >>> build_piece(CHARSET_16, None, (1024, 1024), crt=True)[1]
-        ['cc', 'A', 'V', 'P', 'sl', 'T', 'C', 'R', 'G', 'B']
+        ['cc', 'A', 'V', 'P', 'sl', 'C', 'R', 'G', 'B']
         >>> src.splitlines()[0]
         '/* text.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.'
     """
@@ -710,7 +674,7 @@ def build_piece(charset, mask, canvas, crt=False):
     dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
     order = best_order(charset, dist)
 
-    names = (["S", "L"] if mask else []) + ["cc", "A", "V", "P"] + (["sl", "T", "C"] if crt else []) + ["R", "G", "B"]
+    names = (["S", "L"] if mask else []) + ["cc", "A", "V", "P"] + (["sl", "C"] if crt else []) + ["R", "G", "B"]
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {}
     if mask:
@@ -723,9 +687,8 @@ def build_piece(charset, mask, canvas, crt=False):
     trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"), early=1 if crt else 0)
     if crt:
         trees["sl"] = scanline_counter()
-        trees["T"] = tube_field(canvas)
         trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"))
-        trees["R"] = brightness_channel(prev("R", "C"), prev("R", "T"), prev("R", "sl"))
+        trees["R"] = brightness_channel(prev("R", "C"), prev("R", "sl"))
         trees["G"], trees["B"] = Set(CRT["phosphor_g"]), Set(-WHITE)   # RCT 3: G = R + 40, B = 0
     else:
         trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
@@ -741,7 +704,7 @@ def build_piece(charset, mask, canvas, crt=False):
      xm == {SAMPLE_X}, rows ym {sample_y0}..{sample_y0 + bits - 1} (negative = blank cell); P glyph-row pattern (bit 2 =
      left pixel), shifted per glyph column; R glyph pixels; G and B are 0 deltas (RCT 3 adds R).
      {f"S mask field ({mask}) and L crossing field: a cell is drawn when |L| <= w near the centre or |S| <= half-width elsewhere." if mask else ""}
-     {"sl scanline counter; T tube (superellipse) field; C glow class (3 lit, trail 2, 1); R brightness, G = R + 40, B = 0." if crt else ""}
+     {"sl scanline counter; C glow class (3 lit, trail 2, 1); R brightness by class and scanline, G = R + 25, B = 0." if crt else ""}
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}
 Height {canvas[1]}

@@ -162,3 +162,10 @@
   chords looks rounded. Vignette as three brightness bands + black.
 - Colour via RCT 3 constants: G = R + 25, B = R - 255; outside the tube R = -25 so G = 0.
 - text_infinity_v2 733 B (v1 524 B): +3 channels (18 B) and ~145 nodes.
+
+## 2026-09-04 05:50 — vignette removed
+- User: "plz nix the crt boundary effects like the vignette its not smooth and seems to have added
+  a lot of bytes". Removed the tube field channel and the brightness bands: v2 733 -> 602 B.
+- Lesson: a vignette needs a smooth brightness ramp, but a tree can only emit a handful of
+  discrete values per region (each level multiplies the leaf table), so it bands; and the
+  superellipse field costs ~50 nodes of chord slopes + 6 B. Not worth it here.

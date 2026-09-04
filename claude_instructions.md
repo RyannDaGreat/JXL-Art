@@ -17,7 +17,7 @@ left to right. This is what the JXL Art community does; the web tool is https://
 3. `text` — a grid of pseudo-random **ASCII characters** (glyphs rendered from a compact font),
    again with the CA choosing the characters.
 4. `text_infinity` (v1) — the same text masked to an infinity symbol, whole characters only;
-   `text_infinity_v2` — v1 with a green-amber CRT look (scanlines, phosphor glow, tube vignette).
+   `text_infinity_v2` — v1 with a green-amber CRT look (scanlines, phosphor glow).
 
 **Hard constraints:** file size <= 1024 bytes (`anything above a kilobyte is banned`), image
 >= 1024x1024, the CA must drive the randomness, every result is visually verified by Claude
@@ -107,6 +107,9 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 > "very cool. this is infinity v1. let's also make a v2. this one should have green-amber CRT-like
 > scanlines in foreground and background, with a subtle glow on the letters and a vignette for the
 > monitor boundarie"
+
+> "plz nix the crt boundary effects like the vignette its not smooth and seems to have added a lot
+> of bytes"
 
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
@@ -250,8 +253,8 @@ group holds u in [-1024, 0), the right u in [0, 1024) (one chain each). ~120 nod
 Tried and dropped (see concerns.md): diamond / clipped-hexagon rings ("looks like the HSBC
 logo"), knee-slope hexagons, elliptical rings ("2 circles next to each other").
 
-### text_infinity_v2 — CRT look (733 B), `--crt`
-Same text and mask as v1 plus three hidden channels and a colour rule (all in art/gen_text_tree.py):
+### text_infinity_v2 — CRT look (602 B), `--crt`
+Same text and mask as v1 plus two hidden channels and a colour rule (all in art/gen_text_tree.py):
 - `sl` = y mod 4; rows with sl == 0 are darkened (x0.55) in letters and background alike.
 - `C` glow class: 3 on lit glyph pixels, else W - 1 (a phosphor trail fading to the right over
   2 px: levels 2, 1), and 2 on the pixel before a lit glyph column. This needs the pattern
@@ -259,12 +262,12 @@ Same text and mask as v1 plus three hidden channels and a colour rule (all in ar
   (`pattern_channel(..., early=1)`), so on that pixel "lit" is `W > 2` and the pattern's top bit
   already belongs to the next column. A symmetric halo would need the next cell's value or a
   second font lookup (~+80 B); the one-sided trail is ~5 B and matches beam direction.
-- `T` tube field: superellipse 4096 ((|u|/half W)^3 + (|v|/half H)^3) grown by chord slopes over
-  128-px pieces per group. Brightness bands by radius: < 0.78 full, < 0.92 x0.72, < 1.06 x0.45,
-  beyond black (rounded monitor corners).
-- `R` = brightness table (class x band x scanline: 4 x 3 x 2 leaves), G = R + 25 and B = R - 255
-  via RCT 3 (`Set` constants), so bright pixels are amber-yellow (215,240,0), dim ones green,
-  background (8,33,0); outside the tube R = -25 so G clamps to 0.
+- `R` = brightness table (class x scanline: 4 x 2 leaves), G = R + 25 and B = R - 255 via RCT 3
+  (`Set` constants), so bright pixels are amber-yellow (215,240,0), dim ones green, background
+  (8,33,0).
+- A superellipse tube field with three vignette bands and black corners was built and removed
+  (user: "not smooth and seems to have added a lot of bytes"; it cost ~130 B). Smooth vignettes
+  are not available: brightness can only take a few discrete leaf values per region.
 
 ### Byte-cost model (measured)
 Baseline ~25 B; **each hidden channel costs 6 B of header**; repetitive trees cost ~1.2 B/node,
@@ -281,7 +284,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Five `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B and text_infinity_v2 733 B at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Five `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B and text_infinity_v2 602 B at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 
