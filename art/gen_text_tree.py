@@ -79,6 +79,7 @@ WHITE = 255
 LOGO_TEXT = "JXL-RS "                  # jxl_rs: every run of drawn cells spells this from its left edge
 LOGO_TONE_SPLIT = 3                    # jxl_rs: counter values 1..3 (JXL) in RUST_ORANGE, the rest in RUST_TAN
 RUST_ORANGE, RUST_TAN = (247, 76, 0), (222, 165, 132)   # Ferris orange; GitHub's Rust language colour
+CRT_AMBER_G = (-105, -50)              # jxl_rs_crt: G = R + delta for JXL (orange) and -RS (amber) phosphor; B = 0
 OPTIMIZER_RESTARTS = 40
 
 # ---------------------------------------------------------------- tree DSL (pure functions)
@@ -1122,7 +1123,6 @@ def build_piece(charset, mask, canvas, crt=False, text=None, name=None):
     """
     assert text or (len(charset) & (len(charset) - 1) == 0 and " " not in charset), "power-of-two size, no blank"
     assert mask in (None, "lemniscate") and canvas[1] <= GROUP and canvas[0] <= 2 * GROUP
-    assert not (text and crt)
     two_groups = canvas[0] > GROUP
     if text:
         order = [" "] + list(text)           # index = counter value; 0 is never drawn
@@ -1146,7 +1146,7 @@ def build_piece(charset, mask, canvas, crt=False, text=None, name=None):
         trees["A"] = rule30(2 if two_groups else 1)
         trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
     trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"), early=1 if crt else 0)
-    if text:
+    if text and not crt:
         tone = lambda here, k: If(prev(here, "V"), LOGO_TONE_SPLIT, Set(RUST_TAN[k] - (RUST_TAN[0] if k else 0)),
                                   Set(RUST_ORANGE[k] - (RUST_ORANGE[0] if k else 0)))
         trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"), on=tone("R", 0))
@@ -1155,7 +1155,8 @@ def build_piece(charset, mask, canvas, crt=False, text=None, name=None):
         trees["sl"] = scanline_counter()
         trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"))
         trees["R"] = brightness_channel(prev("R", "C"), prev("R", "sl"))
-        trees["G"], trees["B"] = Set(CRT["phosphor_g"]), Set(-WHITE)   # RCT 3: G = R + 40, B = 0
+        trees["G"] = If(prev("G", "V"), LOGO_TONE_SPLIT, Set(CRT_AMBER_G[1]), Set(CRT_AMBER_G[0])) if text else Set(CRT["phosphor_g"])
+        trees["B"] = Set(-WHITE)             # RCT 3: G = R + delta, B = 0
     else:
         trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
         trees["G"] = trees["B"] = Set(0)      # RCT 3 adds R to these channels: grey = white/black
@@ -1172,7 +1173,7 @@ def build_piece(charset, mask, canvas, crt=False, text=None, name=None):
      (negative = blank cell); P glyph-row pattern (bit 2 = left pixel), shifted per glyph column; R glyph
      pixels; G and B are {"per-tone" if text else "0"} deltas (RCT 3 adds R).
      {f"S mask field ({mask}) and L crossing field: a cell is drawn when |L| <= w near the centre or |S| <= half-width elsewhere." if mask else ""}
-     {"sl scanline counter; C glow class (3 lit, trail 2, 1); R brightness by class and scanline, G = R + 25, B = 0." if crt else ""}
+     {f"sl scanline counter; C glow class (3 lit, trail 2, 1); R brightness by class and scanline, G = R {f'{CRT_AMBER_G[0]} (JXL) / {CRT_AMBER_G[1]} (-RS)' if text else '+ 25'}, B = 0." if crt else ""}
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}
 Height {canvas[1]}
@@ -1194,6 +1195,7 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         >>> # generate(mask="lemniscate", name="text_infinity")  -> text_infinity.tree (2048x1024)
         >>> # generate(mask="lemniscate", crt=True, name="text_infinity_v2")   -> CRT look
         >>> # generate(mask="lemniscate", logo=True)                            -> jxl_rs.tree (spells JXL-RS)
+        >>> # generate(mask="lemniscate", logo=True, crt=True)                  -> jxl_rs_crt.tree (amber terminal)
         >>> # generate(equations=True)                                         -> equations.tree
         >>> # generate(equations=True, inline=True, gap=12, row_gap=1, random_length=True)  -> equations_v2.tree (two per row)
         >>> # generate(equations=True, inline=True, width=1024, name="equations_v3")  -> one equation per line
@@ -1205,7 +1207,7 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap, random_length, one_equals, tall_parens)
         default_name = "equations" + ("_v2" if inline else "_crt" if crt else "")
     else:
-        default_name = "jxl_rs" if logo else ("text_" + mask if mask else "text") + ("_crt" if crt else "")
+        default_name = ("jxl_rs" if logo else "text_" + mask if mask else "text") + ("_crt" if crt else "")
         src, names, order = build_piece(charset, mask, canvas, crt, LOGO_TEXT if logo else None, name or default_name)
     out = TREE_DIR / f"{name or default_name}.tree"
     out.write_text(src)

@@ -246,3 +246,7 @@
   per-run letter counter instead of the CA (uppercase JXL-RS, the 3x5 font has no lowercase),
   two Rust tones via RCT 3 deltas split on the counter.
 - jxl_rs built: 394 B, 287 runs read back, all spell JXL-RS except 8 that cross x = 1024 (restart at J).
+
+## 2026-09-04 11:30 — jxl_rs_crt
+- User: "Very nice, I do miss the scanlines / An old terminal orange scanline pattern would go hard".
+  Reused the CRT channels (sl, C, brightness) with G = R - 105 / -50 by word and B = 0.
