@@ -220,3 +220,12 @@
 - User: "can we make the equations themself shorter, only 1 empty-space between lines", then
   "actually, make the equations of random length". Added `random_length`: in expect_operator at
   depth 0, past EQ_MIN_CELLS, V > EQ_END_V sends the state to BLANK. Row gap back to 1, gap 12.
+
+## 2026-09-04 10:05 — equations_v4: one "=" per line, parens sized by depth
+- User: "not all lines hace exactly one = now" then "make that a  neww version. also can we make
+  outer parentheis bigger and bigger". Design notes: the phase ("=" written yet) must live in S
+  because no later channel can feed back into S within a row; storing it as the low bit under
+  2*depth keeps every class threshold and W+constant transition intact (only depth thresholds
+  scale). Tall parens can only extend below the decision row, so v4 decides tokens at row 19 of the
+  odd band and draws in the even band plus the top of the next odd band; the frame is centred so
+  parens grow symmetrically around the text.

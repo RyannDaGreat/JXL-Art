@@ -412,12 +412,28 @@ def best_order(items, dist, restarts=OPTIMIZER_RESTARTS, seed=0):
     return best
 
 
+def peel_across(at_glyph_start, prev_cc, early=0):
+    """
+    Pure function. Pattern-channel layout: `at_glyph_start` (the glyph row's 3-bit pattern) at
+    xm == GLYPH_X0 - early, copied right with W; the consumed high bit is removed `early` pixels
+    before glyph columns 1 and 2 (early=1 is what the CRT glow class needs).
+
+    Examples:
+        >>> render(peel_across(Set(5), "Prev")).splitlines()[0]
+        'if Prev > 95'
+    """
+    start = GLYPH_X0 - early
+    x1, x2 = GLYPH_X0 + PIXEL - early, GLYPH_X0 + 2 * PIXEL - early
+    across = chain(prev_cc, [(cc_xm_gt(x2), Leaf("W", 0)), (cc_xm_gt(x2 - 1), If("W", 1, Leaf("W", -2), Leaf("W", 0))),
+                             (cc_xm_gt(x1), Leaf("W", 0)), (cc_xm_gt(x1 - 1), If("W", 3, Leaf("W", -4), Leaf("W", 0)))], Leaf("W", 0))
+    return chain(prev_cc, [(cc_xm_gt(start), across), (cc_xm_gt(start - 1), at_glyph_start)], Leaf("N", 0))
+
+
 def pattern_channel(order, prev_value, prev_cc, early=0, flip=FLIP):
     """
     Pure function. Hidden channel P holding the current glyph row's 3-bit pattern: computed at
     xm == GLYPH_X0 - early from the value per glyph row (0 in the cell's margin rows and for blank
-    cells, i.e. negative values), copied right with W; the consumed high bit is removed `early`
-    pixels before glyph columns 1 and 2 (early=1 is what the CRT glow class needs).
+    cells, i.e. negative values), then laid out by peel_across.
 
     Examples:
         >>> render(pattern_channel("AB", "Prev", "Prev2")).splitlines()[0]
@@ -427,11 +443,54 @@ def pattern_channel(order, prev_value, prev_cc, early=0, flip=FLIP):
     per_row = [runs_tree([patterns[ch][r] for ch in order], Set) for r in range(GLYPH_ROWS)]
     start = GLYPH_X0 - early
     row_cases = [(cc_ym_gt(start, GLYPH_Y0 + r * PIXEL - 1), per_row[r]) for r in range(GLYPH_ROWS - 1, -1, -1)]
-    at_glyph_start = If(prev_value, -1, chain(prev_cc, row_cases, Set(0)), Set(0))
-    x1, x2 = GLYPH_X0 + PIXEL - early, GLYPH_X0 + 2 * PIXEL - early
-    across = chain(prev_cc, [(cc_xm_gt(x2), Leaf("W", 0)), (cc_xm_gt(x2 - 1), If("W", 1, Leaf("W", -2), Leaf("W", 0))),
-                             (cc_xm_gt(x1), Leaf("W", 0)), (cc_xm_gt(x1 - 1), If("W", 3, Leaf("W", -4), Leaf("W", 0)))], Leaf("W", 0))
-    return chain(prev_cc, [(cc_xm_gt(start), across), (cc_xm_gt(start - 1), at_glyph_start)], Leaf("N", 0))
+    return peel_across(If(prev_value, -1, chain(prev_cc, row_cases, Set(0)), Set(0)), prev_cc, early)
+
+
+def tall_frame(ch):
+    """
+    Pure function. Row patterns of glyph `ch` over the TALL_FRAME glyph rows of the tall layout:
+    font rows from TALL_TEXT_ROW; parens are TALL_PARENS[opener] rows high, centred on the text,
+    caps 010 and bars 100 (open) or 001 (close).
+
+    Examples:
+        >>> tall_frame("(")[9:14], tall_frame("[")[7], tall_frame("]")[8], tall_frame("]")[15], tall_frame("+")[10]
+        ((2, 4, 4, 4, 2), 2, 1, 2, 2)
+    """
+    frame = [0] * TALL_FRAME
+    openers = {**{o: o for o in TALL_PARENS}, **{c: o for o, c in TALL_CLOSERS.items()}}
+    if ch in openers:
+        n = TALL_PARENS[openers[ch]]
+        top = TALL_TEXT_ROW + (GLYPH_ROWS - n) // 2
+        bar = 0b100 if ch in TALL_PARENS else 0b001
+        frame[top:top + n] = [0b010] + [bar] * (n - 2) + [0b010]
+    else:
+        frame[TALL_TEXT_ROW:TALL_TEXT_ROW + GLYPH_ROWS] = glyph_row_patterns(FONT[ch])
+    return tuple(frame)
+
+
+def tall_pattern_channel(order, prev_token, prev_cc, prev_rt):
+    """
+    Pure function. P for the tall layout (two bands per line, see build_equations): the decide
+    band (RT 1) draws frame rows TALL_FIRST_ROW.. below its decision row and, above it, rows 16..
+    of the previous line's token, which the token channel still holds there; the draw band (RT 0)
+    draws frame rows 8..15. Row cases only where the frame row changes.
+
+    Examples:
+        >>> render(tall_pattern_channel(list("{[()]}Y"), "Prev", "Prev3", "Prev2")).splitlines()[0]
+        'if Prev3 > 95'
+    """
+    frames = {ch: tall_frame(ch) for ch in order}
+    rows_per_band = CELL_H // PIXEL
+
+    def band(frame_rows):                    # frame row per glyph row of the band -> tree over ym, then token
+        rows = [[frames[ch][fr] for ch in order] for fr in frame_rows]
+        cases = [(cc_ym_gt(GLYPH_X0, PIXEL * r - 1), runs_tree(rows[r], Set, prev_token))
+                 for r in range(len(rows) - 1, 0, -1) if rows[r] != rows[r - 1]]
+        return chain(prev_cc, cases, runs_tree(rows[0], Set, prev_token))
+
+    decide = band([r if r >= TALL_FIRST_ROW else 2 * rows_per_band + r for r in range(rows_per_band)])
+    draw = band([rows_per_band + r for r in range(rows_per_band)])
+    return peel_across(If(prev_token, -1, If(prev_rt, 0, decide, draw), Set(0)), prev_cc)
 
 
 def colour_channel(prev_pattern, prev_cc):
@@ -697,6 +756,12 @@ EQ_ROWS = 3                                  # v1: cell rows per expression (1 e
 EQ_RT_INIT = 1                               # v1 row type before the first band: bands go 2, 0, 1, ...
 EQ_END_V = 23                                # random_length: V > 23 after a top-level operand ends the equation (1 in 4)
 EQ_MIN_CELLS = 8                             # random_length: no equation ends before this many tokens
+EQ_EQUALS_V = 15                             # one_equals: V > 15 after a top-level operand writes the "=" (1 in 2)
+TALL_PARENS = {"{": 13, "[": 9, "(": 5}      # tall_parens: open paren glyph by depth after opening 1..3 -> height in glyph rows
+TALL_CLOSERS = {"{": "}", "[": "]", "(": ")"}
+TALL_TEXT_ROW = 9                            # tall_parens: frame glyph row of the text's first row (draw band row 1); parens centre on it
+TALL_FIRST_ROW = 5                           # tall_parens: first frame row a decide band can draw; tokens are decided at pixel row 4*5 - 1
+TALL_FRAME = 24                              # tall_parens: frame = decide band glyph rows 0..7, draw band 8..15, next decide band 16..23
 EQ_PALETTE = {"parens": (170, 170, 170), "operators": (255, 140, 50), "variables": (110, 190, 255),
               "digits": (200, 150, 255), "functions": (255, 220, 90)}   # v2 syntax colours on black
 
@@ -742,12 +807,17 @@ def eq_row_type(prev_cc, period=EQ_ROWS, init=EQ_RT_INIT):
     return If("x", 0, Leaf("W", 0), If("y", 0, If(prev_cc, 0, Leaf("N", 0), step), Set(init)))
 
 
-def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev_rt=None, random_length=False):
+def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev_rt=None, random_length=False,
+             one_equals=False, tall=False):
     """
     Pure function. State channel S (see above), decided once per cell at xm == SAMPLE_X on
     `decide_row`, copied right (W) and down (N); reset at x == 0 (each decoder group is one
     line) and blank above `first_line_y`. Random choices use the 5-bit value V. With
     `random_length` a top-level operand may end the equation once EQ_MIN_CELLS tokens are drawn.
+    `one_equals` stores depth as 2*depth + a with a = 1 once the single "=" is written: "=" is
+    offered only before it, ending only after it, and the forced closes keep room for "=" + operand.
+    `prev_rt` row types blank the state on spacer rows, or with `tall` decide on RT 1 bands and
+    copy it down through the RT 0 draw bands.
 
     Examples:
         >>> render(eq_state("Prev", "Prev2", 11, 64, True, 52)).splitlines()[0]
@@ -757,45 +827,51 @@ def eq_state(prev_v, prev_cc, decide_row, line_cells, inline, first_line_y, prev
     base = lambda cls: 8 * C[cls]
     fn_first = "FN1" if inline else "FUNC"
     fn_cells = 5 if inline else 3            # cells a function needs after its first: letters, "(", operand, ")"
+    stride = 2 if one_equals else 1          # depth is stored as stride * depth (the "after =" bit sits below it)
+    reserve = 1 if one_equals else 0         # forced closes start earlier so that "=" and an operand still fit
     cells_left_le = lambda k, then, other: If("x", CELL_W * (line_cells - k), then, other)
 
-    def expect_operand(b):                   # W in [b, b + 8): depth = W - b
-        to_operand, to_open, to_func = Leaf("W", base("OPERAND") - b), Leaf("W", 1 - b), Leaf("W", base(fn_first) - b)
-        shallow = lambda then: If("W", b + EQ_MAX_DEPTH - 1, to_operand, then)
+    def expect_operand(b):                   # W in [b, b + 8): depth = (W - b) // stride
+        to_operand, to_open, to_func = Leaf("W", base("OPERAND") - b), Leaf("W", stride - b), Leaf("W", base(fn_first) - b)
+        shallow = lambda then: If("W", b + stride * EQ_MAX_DEPTH - 1, to_operand, then)
         with_fn = If(prev_v, 23, shallow(to_open), If(prev_v, 19, shallow(to_func), to_operand))
         without_fn = If(prev_v, 23, shallow(to_open), to_operand)
-        return cells_left_le(EQ_MAX_DEPTH + 3, to_operand, cells_left_le(EQ_MAX_DEPTH + fn_cells, without_fn, with_fn))
+        return cells_left_le(EQ_MAX_DEPTH + 3, to_operand, cells_left_le(EQ_MAX_DEPTH + fn_cells + reserve, without_fn, with_fn))
 
     def expect_operator(b):
-        to_close, to_op, to_blank = Leaf("W", base("CLOSE") - 1 - b), Leaf("W", base("OP") - b), Set(base("BLANK"))
-        deep = lambda then, other: If("W", b, then, other)            # depth > 0
+        to_close, to_op, to_blank = Leaf("W", base("CLOSE") - stride - b), Leaf("W", base("OP") - b), Set(base("BLANK"))
+        to_equals = Leaf("W", 1 - b)         # OPEN class at depth 0 with the "after =" bit: drawn as "=" (a real "(" has depth > 0)
+        deep = lambda then, other: If("W", b + stride - 1, then, other)            # depth > 0
+        after_equals = (lambda then, other: If("W", b, then, other)) if one_equals else (lambda then, other: then)
         may_end = If("x", CELL_W * EQ_MIN_CELLS, If(prev_v, EQ_END_V, to_blank, to_op), to_op) if random_length else to_op
-        return cells_left_le(2, deep(to_close, to_blank),
-                             cells_left_le(EQ_MAX_DEPTH + 1, deep(to_close, to_op),
-                                           deep(If(prev_v, 21, to_close, to_op), may_end)))
+        forced = after_equals(cells_left_le(2, to_blank, to_op), to_equals)
+        free = after_equals(may_end, If(prev_v, EQ_EQUALS_V, to_equals, to_op))
+        return cells_left_le(EQ_MAX_DEPTH + 1 + 2 * reserve, deep(to_close, forced), deep(If(prev_v, 21, to_close, to_op), free))
 
     cases = [(base("BLANK") - 1, Set(base("BLANK"))), (base("OPERAND") - 1, expect_operator(base("OPERAND"))),
              (base("CLOSE") - 1, expect_operator(base("CLOSE")))]
     if inline:
-        cases += [(base("FN3") - 1, Leaf("W", 1 - base("FN3"))), (base("FN2") - 1, Leaf("W", 8)), (base("FN1") - 1, Leaf("W", 8))]
+        cases += [(base("FN3") - 1, Leaf("W", stride - base("FN3"))), (base("FN2") - 1, Leaf("W", 8)), (base("FN1") - 1, Leaf("W", 8))]
     else:
-        cases += [(base("FUNC") - 1, Leaf("W", 1 - base("FUNC")))]
+        cases += [(base("FUNC") - 1, Leaf("W", stride - base("FUNC")))]
     cases += [(base("OP") - 1, expect_operand(base("OP")))]
     decide = If("y", first_line_y - 1, chain("W", cases, expect_operand(0)), Set(base("BLANK")))
-    if prev_rt is not None:                  # spacer rows (row type != 0) stay blank
-        decide = If(prev_rt, 0, Set(base("BLANK")), decide)
+    if prev_rt is not None:
+        decide = If(prev_rt, 0, decide, Leaf("N", 0)) if tall else If(prev_rt, 0, Set(base("BLANK")), decide)
     sample = If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0),
                 If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row - 1), decide, Leaf("N", 0)))
     cell = chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), sample)], Leaf("W", 0))
     return If("x", 0, cell, Set(base("OP")))
 
 
-def eq_token(order, prev_s, prev_v, prev_cc, decide_row, inline, prev_rt=None):
+def eq_token(order, prev_s, prev_v, prev_cc, decide_row, inline, prev_rt=None, one_equals=False, tall=False):
     """
     Pure function. Token channel T: the glyph index for the cell, picked from the state's class
     (random details from V). Word letters after the first copy the successor letter of the glyph
     to the left (inline) or above (v1 hanging rows, when the row type is not 0). Blank cells are
-    BLANK (negative); the first cell of a line reads a garbage W but never needs it.
+    BLANK (negative); the first cell of a line reads a garbage W but never needs it. `one_equals`
+    draws the OPEN state at depth 0 as "=" and drops "=" from the operators; `tall` picks {, [, (
+    and }, ], ) by depth and copies tokens down through the RT 0 draw bands.
 
     Examples:
         >>> render(eq_token(list(EQ_GLYPHS), "Prev", "Prev2", "Prev3", 11, True)).splitlines()[0]
@@ -803,10 +879,15 @@ def eq_token(order, prev_s, prev_v, prev_cc, decide_row, inline, prev_rt=None):
     """
     C = eq_classes(inline)
     base = lambda cls: 8 * C[cls]
+    stride = 2 if one_equals else 1
     g = lambda ch: Set(order.index(ch))
     pick = lambda cases, default: chain(prev_v, [(k, g(ch)) for k, ch in cases], g(default))
     operators = pick([(17, "+"), (12, "-"), (7, "·"), (3, "/")], "^")
-    operator = If(prev_s, base("OP"), operators, pick([(17, "+"), (12, "-"), (7, "·"), (5, "/")], "="))
+    operator = operators if one_equals else If(prev_s, base("OP"), operators, pick([(17, "+"), (12, "-"), (7, "·"), (5, "/")], "="))
+    by_depth = lambda b, glyphs, first: chain(prev_s, [(b + stride * (k + first) - 1, g(glyphs[k])) for k in range(len(glyphs) - 1, 0, -1)], g(glyphs[0]))
+    opens = by_depth(0, list(TALL_PARENS), 1) if tall else g("(")                          # depth after opening 1..3
+    closes = by_depth(base("CLOSE"), list(TALL_CLOSERS.values()), 0) if tall else g(")")  # depth after closing 0..2
+    open_or_equals = If(prev_s, stride - 1, opens, g("=")) if one_equals else opens
     first = [w[0] for w in EQ_WORDS]
     first_letter = pick([(19 + k, first[k]) for k in range(len(first) - 1, 0, -1)], first[0])
     successor = eq_successors()
@@ -814,14 +895,19 @@ def eq_token(order, prev_s, prev_v, prev_cc, decide_row, inline, prev_rt=None):
         table = runs_tree([order.index(successor[ch]) if ch in successor else BLANK for ch in order], Set, prop=prop)
         return If(prop, -1, table, Set(BLANK))
     cases = [(base("BLANK") - 1, Set(BLANK)), (base("OPERAND") - 1, pick([(13, "Y"), (8, "Z"), (5, "1"), (2, "2")], "3")),
-             (base("CLOSE") - 1, g(")"))]
+             (base("CLOSE") - 1, closes)]
     if inline:
         cases += [(base("FN3") - 1, succ("W")), (base("FN2") - 1, succ("W")), (base("FN1") - 1, first_letter)]
     else:
         cases += [(base("FUNC") - 1, first_letter)]
     cases += [(base("OP") - 1, operator)]
-    expression = chain(prev_s, cases, g("("))
-    decision = expression if inline else If(prev_rt, 0, succ("N"), expression)
+    expression = chain(prev_s, cases, open_or_equals)
+    if prev_rt is None:
+        decision = expression
+    elif tall:
+        decision = If(prev_rt, 0, expression, Leaf("N", 0))     # RT 0 draw bands copy the decide band's tokens down
+    else:
+        decision = If(prev_rt, 0, succ("N"), expression)
     sample = If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0),
                 If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row - 1), decision, Leaf("N", 0)))
     # the xm == 0 column copies the previous cell's glyph so inline word letters can read it as W;
@@ -830,9 +916,20 @@ def eq_token(order, prev_s, prev_v, prev_cc, decide_row, inline, prev_rt=None):
     return If("y", 0, cell, Set(BLANK))
 
 
-def kind_ends(order):
+def eq_kinds(parens="()"):
     """
-    Pure function. Last glyph index of each kind's block, in EQ_KINDS order (the order must keep
+    Pure function. EQ_KINDS with the parens kind replaced (tall_parens draws six paren glyphs).
+
+    Examples:
+        >>> eq_kinds("{[()]}")["parens"], list(eq_kinds())
+        ('{[()]}', ['parens', 'operators', 'variables', 'digits', 'functions'])
+    """
+    return {**EQ_KINDS, "parens": parens}
+
+
+def kind_ends(order, kinds=EQ_KINDS):
+    """
+    Pure function. Last glyph index of each kind's block, in `kinds` order (the order must keep
     each kind's glyphs contiguous).
 
     Examples:
@@ -840,14 +937,14 @@ def kind_ends(order):
         [1, 7, 9, 12, 22]
     """
     ends, pos = [], 0
-    for glyphs in EQ_KINDS.values():
+    for glyphs in kinds.values():
         assert set(order[pos:pos + len(glyphs)]) == set(glyphs), "glyph order must keep kinds contiguous"
         pos += len(glyphs)
         ends.append(pos - 1)
     return ends
 
 
-def colour_index_channel(order, prev_token, prev_pattern, prev_cc):
+def colour_index_channel(order, prev_token, prev_pattern, prev_cc, kinds=EQ_KINDS):
     """
     Pure function. K channel (v2): 0 on unlit pixels, else 1 + kind index of the cell's glyph,
     read off the token with thresholds at the kind blocks.
@@ -856,7 +953,7 @@ def colour_index_channel(order, prev_token, prev_pattern, prev_cc):
         >>> render(colour_index_channel(list(EQ_GLYPHS), "Prev2", "Prev", "Prev3")).splitlines()[0]
         'if Prev3 > 447'
     """
-    ends = kind_ends(order)
+    ends = kind_ends(order, kinds)
     kind = chain(prev_token, [(ends[i - 1], Set(i + 1)) for i in range(len(ends) - 1, 0, -1)], Set(1))
     lit = lambda split: If(prev_pattern, split, kind, Set(0))
     x0, x1, x2, x3 = (GLYPH_X0 + c * PIXEL for c in range(4))
@@ -876,27 +973,31 @@ def palette_channel(prev_kind, component):
     return chain(prev_kind, [(k, Set(colours[k])) for k in range(len(colours) - 1, -1, -1)], Set(0))
 
 
-def kinds_order():
+def kinds_order(kinds=EQ_KINDS):
     """
     Near-pure (seeded optimiser). Glyph order with each kind's glyphs contiguous, each block
-    ordered for few glyph-row changes.
+    ordered for few glyph-row changes; the parens block keeps its given order (tall parens have
+    no font glyph and their bars already match).
 
     Examples:
         >>> o = kinds_order(); set(o[:2]) == {"(", ")"} and len(o) == len(EQ_GLYPHS)
         True
     """
     dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
-    return [ch for glyphs in EQ_KINDS.values() for ch in best_order(glyphs, dist)]
+    return [ch for kind, glyphs in kinds.items() for ch in (list(glyphs) if kind == "parens" else best_order(glyphs, dist))]
 
 
-def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0, random_length=False):
+def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0, random_length=False, one_equals=False, tall_parens=False):
     """
     Pure function. (tree source, channel names, glyph order) for the random-equations piece.
     inline=True is v2: names written inline and syntax-coloured (no CRT variant). `gap` cells at
     the end of each decoder group stay blank (space between side-by-side equations). A
     1024-wide canvas is one group, i.e. one equation per line. `row_gap` blank cell rows are
     left between equation rows (inline only; v1 already has its two hanging rows). `random_length`
-    lets equations end early at random (see eq_state) instead of filling the line.
+    lets equations end early at random (see eq_state) instead of filling the line. `one_equals`
+    writes exactly one "=" per line (eq_state). `tall_parens` (inline, row_gap 1) draws parens sized
+    by depth on a two-band layout: the RT 1 band decides tokens low enough to draw big parens'
+    tops under its decision row, the RT 0 band draws the text (tall_pattern_channel).
 
     Examples:
         >>> build_equations((2048, 1024))[1]
@@ -905,11 +1006,13 @@ def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0
         ['cc', 'A', 'V', 'S', 'T', 'P', 'K', 'R', 'G', 'B']
     """
     assert not (crt and inline)
+    assert not tall_parens or (inline and row_gap == 1), "tall parens need the inline two-band layout"
     bits = 5
-    sample_y0 = GLYPH_Y0 - bits
-    decide_row = sample_y0 + bits - 1
+    decide_row = PIXEL * TALL_FIRST_ROW - 1 if tall_parens else GLYPH_Y0 - 1
+    sample_y0 = decide_row - bits + 1
+    kinds = eq_kinds("{[()]}" if tall_parens else "()")
     if inline:
-        order = kinds_order()
+        order = kinds_order(kinds)
     else:
         dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
         order = best_order(EQ_GLYPHS, dist)
@@ -925,14 +1028,17 @@ def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0
     if not inline:
         trees["RT"] = eq_row_type(prev("RT", "cc"))
     elif spaced:
-        trees["RT"] = eq_row_type(prev("RT", "cc"), period=row_gap + 1, init=row_gap)   # band 1 is an expression row
+        trees["RT"] = eq_row_type(prev("RT", "cc"), period=row_gap + 1, init=row_gap)   # bands 0, 2, 4 .. are type 0
     trees["S"] = eq_state(prev("S", "V"), prev("S", "cc"), decide_row, line_cells, inline, first_line_y,
-                          prev("S", "RT") if spaced else None, random_length)
+                          prev("S", "RT") if spaced else None, random_length, one_equals, tall_parens)
     trees["T"] = eq_token(order, prev("T", "S"), prev("T", "V"), prev("T", "cc"), decide_row, inline,
-                          None if inline else prev("T", "RT"))
-    trees["P"] = pattern_channel(order, prev("P", "T"), prev("P", "cc"), early=1 if crt else 0, flip=False)
+                          prev("T", "RT") if tall_parens or not inline else None, one_equals, tall_parens)
+    if tall_parens:
+        trees["P"] = tall_pattern_channel(order, prev("P", "T"), prev("P", "cc"), prev("P", "RT"))
+    else:
+        trees["P"] = pattern_channel(order, prev("P", "T"), prev("P", "cc"), early=1 if crt else 0, flip=False)
     if inline:
-        trees["K"] = colour_index_channel(order, prev("K", "T"), prev("K", "P"), prev("K", "cc"))
+        trees["K"] = colour_index_channel(order, prev("K", "T"), prev("K", "P"), prev("K", "cc"), kinds)
         for i, ch in enumerate("RGB"):
             trees[ch] = palette_channel(prev(ch, "K"), i)
     elif crt:
@@ -948,10 +1054,10 @@ def build_equations(canvas, crt=False, inline=False, gap=0, name=None, row_gap=0
     header = f"""/* {name}.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.
    {canvas[0]}x{canvas[1]}: random well-formed equations (matched parentheses, max depth {EQ_MAX_DEPTH}) from a counter
    automaton; one token per cell, {line_cells} cells per equation, one equation per decoder group and cell row;
-   function names {"inline, tokens coloured by kind" if inline else "SIN/COS/TAN written downward"}.
+   function names {"inline, tokens coloured by kind" if inline else "SIN/COS/TAN written downward"}{"; one = per line; parens sized by depth over two bands per line" if tall_parens else ""}.
    Glyph order: {"".join(order)!r}
    Channels: {", ".join(f"c{i} {n}" for i, n in enumerate(names))}
-     cc cell counter; A Rule 30; V 5 random bits; S = 8*class + depth; T glyph index; P glyph-row pattern;
+     cc cell counter; A Rule 30; V 5 random bits; S = {'8*class + 2*depth (+1 after the =)' if one_equals else '8*class + depth'}; T glyph index; P glyph-row pattern;
      {"K colour index (0 unlit, else 1 + kind); R G B palette lookups." if inline else "RT row type (0 expression, 1-2 hanging); R draws."}
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}
@@ -1028,7 +1134,8 @@ HiddenChannel {len(names) - 3}
     return header + render(tree) + "\n", names, order
 
 
-def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0, row_gap=0, random_length=False):
+def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0, row_gap=0,
+             random_length=False, one_equals=False, tall_parens=False):
     """
     Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree / equations.tree);
     prints node count. Default canvas: 1024x1024 without a mask, 2048x1024 with one or for equations.
@@ -1040,11 +1147,12 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         >>> # generate(equations=True)                                         -> equations.tree
         >>> # generate(equations=True, inline=True, gap=12, row_gap=1, random_length=True)  -> equations_v2.tree (two per row)
         >>> # generate(equations=True, inline=True, width=1024, name="equations_v3")  -> one equation per line
+        >>> # generate(equations=True, inline=True, gap=12, row_gap=1, random_length=True, one_equals=True, tall_parens=True, name="equations_v4")
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
     canvas = (width or (2 * GROUP if (mask or equations) else GROUP), height)
     if equations:
-        src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap, random_length)
+        src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap, random_length, one_equals, tall_parens)
         default_name = "equations" + ("_v2" if inline else "_crt" if crt else "")
     else:
         src, names, order = build_piece(charset, mask, canvas, crt)

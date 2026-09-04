@@ -132,6 +132,10 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 > "can we make the equations themself shorter, only 1 empty-space between lines" (interrupted)
 > "actually, make the equations of random length"
 
+> "not all lines hace exactly one = now"
+
+> "make that a  neww version. also can we make outer parentheis bigger and bigger"
+
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
 installs that leave no trace in the dump. Top level therefore holds `setup.sh` next to the manifest.
@@ -290,9 +294,10 @@ Same text and mask as v1 plus two hidden channels and a colour rule (all in art/
   (user: "not smooth and seems to have added a lot of bytes"; it cost ~130 B). Smooth vignettes
   are not available: brightness can only take a few discrete leaf values per region.
 
-### equations — equations.tree (561 B), equations_crt.tree (630 B), equations_v2.tree (711 B), equations_v3.tree (658 B)
+### equations — equations.tree (556 B), equations_crt.tree (625 B), equations_v2.tree (705 B), equations_v3.tree (652 B), equations_v4.tree (806 B)
 Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 1 --random_length` (v2) and
-`--equations --inline --width 1024 --name equations_v3` (v3).
+`--equations --inline --width 1024 --name equations_v3` (v3) and
+`--equations --inline --gap 12 --row_gap 1 --random_length --one_equals --tall_parens --name equations_v4` (v4).
 A context-free grammar rendered as text. Matched parentheses of one kind are a one-counter
 language (Dyck-1), so no stack is needed: tokens are generated left to right, one per 16x32 cell,
 by a counter automaton whose whole state is one channel value `S = 8*class + depth` (classes
@@ -325,6 +330,25 @@ choices use the 5-bit value V. The first band is blank (too close to the seed ro
   independently and the depth counter cannot cross the boundary.
 Verification: `python3.10 art/experiments/verify_equations.py equations|equations_v2` reads the
 glyphs back from the PNG (max of R,G,B > 60 = lit) and checks every line: 20/20, 30/30, 30/30.
+- v4 (`equations_v4`, user: "not all lines hace exactly one = now" ... "make that a  neww version.
+  also can we make outer parentheis bigger and bigger"): v2's layout (gap 12, row_gap 1, random
+  length) plus `one_equals` and `tall_parens`.
+  `one_equals`: S = 8*class + 2*depth + a, a = 1 once the "=" has been written. "=" is offered
+  (V > EQ_EQUALS_V, 1 in 2) only at depth 0 before it and ending only after it; the forced-close
+  zone starts two cells earlier (and functions need one more cell) so "=" plus an operand always
+  fit. The "=" state is the OPEN class at depth 0 (a real "(" has depth >= 1), so the token
+  channel draws it from the OPEN band with one extra split; "=" leaves the operator pool.
+  `tall_parens`: opens are drawn {, [, ( by depth after opening 1..3 and closers }, ], ) by depth
+  after closing 0..2 (six paren glyphs, order "{[()]}" so their bars share runs). Heights 13, 9, 5
+  glyph rows (52, 36, 20 px) centred on the text: the cap rows are 010, the bars 100 / 001. Two
+  bands per line, a 24-glyph-row frame: the odd band (RT 1) decides tokens at row 19 (V sampled
+  rows 15..19) and draws frame rows 5..7 below that; the even band (RT 0) copies S and T down and
+  draws frame rows 8..15 with the text at 9..13; the next odd band still holds the previous
+  tokens above its decision row and draws frame rows 16..19 there. Nothing can be drawn above the
+  decision row (pixels there are decoded before the token exists), which is why the decision sits
+  low in the odd band. P = tall_pattern_channel (frame per token from tall_frame), row cases only
+  where the frame row changes. First decide band is band 1 (samples at rows 67..71); 15 lines per
+  group; the verifier reads the even bands with the text at band row 4 and requires one "=".
 
 ### Decoder validity: no redundant splits
 libjxl validates trees on decode: a split on a property whose outcome is already fixed by an
@@ -347,7 +371,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Nine `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 559 B, equations_crt 630 B, equations_v2 711 B, equations_v3 658 B (1024x1024); six of them at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Ten `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 806 B; seven of them at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 
