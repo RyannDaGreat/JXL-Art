@@ -346,7 +346,7 @@ and B = R + 60, the rim gets none) so green and blue extend one pixel to the rig
 fringe on the left edge and a cyan-green one on the right, one pixel wide (a quarter of a glyph
 pixel). text_infinity_v2 keeps rim class 2 and its bytes.
 
-### quotes — quotes.tree (SIZE B)
+### quotes — quotes.tree (996 B)
 Generate with `--quotes --pixel 1` (2048x1024). User: "why don't we take that equation generator and
 turn it into a madlibs-style thing generate a bunch of grammars that make sentences and then randomly
 generate pseudo-intellectual philosophical quotes", then "make the pixel font 1px-per-pixel insted of the
@@ -506,7 +506,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Fourteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Fourteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, quotes 996 B, primes 415 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 
