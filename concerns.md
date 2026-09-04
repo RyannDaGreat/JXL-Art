@@ -274,3 +274,21 @@
   (apply_geometry), slots of 64 cells with a slot counter channel, VERB/PREP share a marker, and the
   adjective decision moved to the determiner's last letter so each word list is stored once.
 - Forked a subagent for the primes piece (user: "fork a subagent to do the prime thing").
+- Quotes v2 measured: 60 words = 1340 B (1063 nodes); letters cost ~2.5 B each and the word-choice
+  chains ~150 B. A bug had doubled the token table (line_start = the whole decision tree). v3: S builds
+  its own random bits so picks are single N + base leaves; V channel dropped; vocabulary class-major.
+
+## 2026-09-04 12:55 — primes (fork)
+- The obvious sieve (counter n mod d compared with the divisor through NW-N) marks n = d as composite
+  too; two encodings were tried before settling on the down-counter + activation wave (a diagonal
+  y - x >= R0, exact because block width = band height). Lesson: when a counter needs "skip the
+  first cycle", gate it spatially instead of encoding a phase in its value.
+- Digits: a shared pattern table needs the same channel value at each glyph start; alternating
+  ones/tens along the row with WW and choosing odd/even start columns (pitch 5) made one table serve
+  two glyphs; a third would need another trick (hundreds is a fixed "1" from band 100).
+- First bar build showed count - 1 units: BAR_X itself is 0 mod 30, so the countdown ticked on the
+  bar's first pixel; the countdown now starts one unit later. Caught by verify_primes.py.
+- First render showed "02", "03" and partial "0" glyphs in rows 0..3: the tens glyph is now blanked
+  below band 10 and the label above band 1 (in L, 2 y tests) instead of duplicating the pattern table.
+- Left half of the width was empty (proper divisors end at n / 2): moved the label to 510 and added the
+  divisor-count bar chart, which also makes primes readable from afar.

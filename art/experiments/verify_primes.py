@@ -62,9 +62,13 @@ def check_band(px, n):
     expected = primes.ONE if n == 1 else primes.PRIME if is_prime(n) else primes.COMPOSITE
     if lit is None or not close(lit, expected):
         problems.append(f"label colour {lit}, expected {expected}")
-    bar_lit = not close(px[primes.BAR_X + 2, y + 2], primes.BACKGROUND)
-    if bar_lit != is_prime(n):
-        problems.append(f"bar {'lit' if bar_lit else 'dark'}")
+    count = sum(n % d == 0 for d in range(2, n))
+    units = [not close(px[primes.BAR_X + primes.BAR_UNIT * j + 3, y + 2], primes.BACKGROUND) for j in range(count + 1)]
+    if is_prime(n):
+        if not (units[0] and close(px[primes.BAR_X + 3, y + 2], primes.PRIME)):
+            problems.append("prime stub missing")
+    elif units != [True] * count + [False]:
+        problems.append(f"bar shows {units.index(False) if False in units else '>' + str(count)} units, expected {count}")
     for k in range(primes.LABEL_X // primes.BAND):
         d = k + 2
         mark = not close(px[primes.BAND * k + 3, y + 2], primes.BACKGROUND)

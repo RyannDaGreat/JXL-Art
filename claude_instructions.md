@@ -353,8 +353,9 @@ generate pseudo-intellectual philosophical quotes", then "make the pixel font 1p
 ~12x20 it is now per character (i.e. 4x smaller, smaller gaps between lines, more quotes, bigger vocab)".
 Look: a wall of tiny parchment-coloured quotes, e.g. "THE SILENT MIND DEVOURS EVERY TRUTH OF THE SOUL."
 Geometry (`apply_geometry(1)`, GEOMETRY table): PIXEL 1, cells 4x10 (glyph 3x5 at xm 1..3, ym 5..9),
-V sampled in column xm 0 rows 0..4, decision row 4. Sampling at xm 0 is fine here because the first
-cell of every line is the fixed opening quote, so the seed column's non-random bits are never used.
+random bits sampled in column xm 0 rows 0..4, decision row 5 (the first glyph row: the token channel
+decides there too and the pattern channel reads it on the same pixel). Sampling at xm 0 is fine here
+because the first cell of every line is the fixed opening quote, so the seed column's bits are unused.
 Rows are 10 px apart (5 px glyph + 5 px gap); the first 6 bands (60 rows below the seed row) are blank.
 Slots: a slot counter channel Q (px within a 64-cell slot, 256 px, 4 slots per group line, 8 per
 2048-px row) restarts a quote at every slot start; the last QUOTE_MARGIN cells of a slot are never
@@ -362,24 +363,64 @@ written. Every group line therefore holds 4 quotes, 94 lines per group: ~750 quo
 Grammar (regular, over classes): " DET (ADJ)? NOUN ((VERB | PREP) DET (ADJ)? NOUN)* ." with the
 choices made at the last letter of a word (so the full stop follows the noun directly) or at the
 blank cell after it (a negative marker: NEEDS_DET, NEEDS_ADJ, NEEDS_NOUN, AFTER_NOUN; END sticks):
-- DET's last letter: V > QUOTE_ADJ_V (about 1 in 3) -> NEEDS_ADJ else NEEDS_NOUN; ADJ's last letter ->
-  NEEDS_NOUN; VERB/PREP -> NEEDS_DET (one shared marker, so VERB and PREP words can be one table
-  group); NOUN's last letter: before QUOTE_MIN_CELLS of the slot it always continues, else it ends
-  (writes ".") when V > QUOTE_END_V (1 in 2); the full stop's end is the closing quote, whose end is END.
-- Marker moves (`v_pick`: 32 V values split by weight): NEEDS_DET -> DET words (THE 3x), NEEDS_ADJ ->
-  ADJ words, NEEDS_NOUN -> NOUN words, AFTER_NOUN -> VERB (weight 3, IS 2x) or PREP (1, OF 2x) words.
-  Deciding "adjective or not" at the determiner's last letter is what lets each word list appear once.
-State channel S = QUOTE_POS * pos + w while spelling (advance W + QUOTE_POS); the vocabulary is sorted
-by length then class so the last-letter table is one entry per (length, move) range. Token channel T:
-one runs_tree per position over the sorted words (don't-care positions filled to merge runs), BLANK
-for S < 0. P, R, G, B as the text pieces (QUOTE_COLOUR parchment via RCT 3 deltas).
+- DET's last letter: R > QUOTE_ADJ_V (about 1 in 3) -> NEEDS_ADJ else NEEDS_NOUN; ADJ's last letter ->
+  NEEDS_NOUN; VERB/PREP -> NEEDS_DET (one shared marker); NOUN's last letter: before QUOTE_MIN_CELLS
+  of the slot it always continues, else it ends (writes ".") when R > QUOTE_END_V (1 in 2); the full
+  stop's end is the closing quote, whose end is END.
+- Random bits: there is no V channel. S builds a 5-bit value R in its own decision column over the
+  cell's rows 0..4 (Rule 30 thresholds, Set / N + 16, 8, 4, 2, 1) and decides on row 5 = the first
+  glyph row, where N is R and W is the previous cell's state. A word pick is then ONE leaf, N + base
+  (`wrap_pick`: R mod n by a couple of wrap leaves, so the first words of a class come up slightly more
+  often), instead of a chain with a leaf per word: NEEDS_NOUN -> N + base_NOUN, NEEDS_ADJ -> N + base_ADJ,
+  AFTER_NOUN -> N + base_VERB over the VERB+PREP block (verbs first, so they are favoured), NEEDS_DET ->
+  a weighted 4-leaf chain (THE half the time). This is why the vocabulary index is class-major.
+State channel S = QUOTE_POS * pos + w while spelling (advance W + QUOTE_POS). The vocabulary is sorted
+by class, then length, then alphabetically, so each class is one index block (picks) and each
+(class, length) group is contiguous: the last-letter table is one case per (class, length) plus an
+advance case per (class, position), adjacent equal moves merged. Token channel T: one runs_tree per
+position over the sorted words (don't-care positions filled to merge runs), BLANK for S < 0. P, R, G, B
+as the text pieces (QUOTE_COLOUR parchment via RCT 3 deltas).
 Line-end zones (quote_zones, from the word lengths, cells left including the current one): NOUN's last
 letter <= zone_end ends; DET's last letter <= zone_det takes no adjective; NEEDS_NOUN <= zone_short picks
 a 4-letter noun (QUOTE_SHORT_NOUNS); NEEDS_DET <= zone_the writes THE. Derived so that every free choice
 leaves a state that can still finish with ." inside the slot (see the docstring).
-Byte budget: the letter table costs ~2 nodes per letter, so the vocabulary is what the budget allows
-(QUOTE_WORDS, all words <= 7 letters, 18 letters + 2 marks as glyphs). Verified by
+Byte budget: the letter table costs about 2.5 B per letter (a split with a ~9-bit value and a leaf), so
+the vocabulary is what the budget allows (QUOTE_WORDS, all words <= 7 letters). Measured: 35 words with a
+chain-pick design were ~1000 B; 60 words 1340 B; the arithmetic picks and dropping V bought ~150 B. Verified by
 `art/experiments/verify_quotes.py` (reads every slot back, checks the class regex, prints word usage).
+
+### primes — primes.tree (415 B)
+Generate with `python3.10 art/gen_primes.py` (its own generator, art/gen_primes.py, importing the tree
+DSL from gen_text_tree.py). User: "can we have another one that uses cellular automata to calculate
+prime numers, or at least, from top to bottom count 1,2,3,4,5,....and mark the primes different colors?"
+(built by a forked subagent: "fork a subagent to do the prime thing").
+1024x1024, one decoder group, everything at 1 px: row 0 is a seed row, then n = 1 .. 170 down the
+image, BAND = 6 rows each. Left: a sieve of Eratosthenes. Divisor d = 2, 3, .. owns a 6-px block;
+block column 0 holds d (seed row: W + 1 at block starts, x == 0 is 2; below: N), column 1 is a counter
+that at each band's first row goes N - 1 while N > 1, becomes 0 after 1 (the hit) and restarts from
+NW - 1 = d - 1 after a hit (NW is the divisor one row up in column 0), so it is 0 exactly when d | n; the
+other columns copy it so a 4x4 square is drawn per hit (MARK_ROWS 1..4). WHY a down-counter: the
+restart value d - 1 is a predictor with a constant offset (NW - 1) and the hit is the constant 0, so
+no per-divisor thresholds exist. The trivial hit (d = n) is removed by the activation wave: channel Act
+copies NW, i.e. Act = 1 iff y - x >= R0 = Y0 + 2 BAND - 1 = 15; with block width = band height that
+diagonal passes the counter of block d exactly at band n = d + 1, the counter stays INACTIVE (-2)
+before that, starts at d - 1 = (-(d + 1)) mod d and first hits at 2d. M accumulates "some counter is
+0" along the row (composite flag). Proper divisors stop at n / 2, so the sieve only needs x < 510; the
+label sits at LABEL_X = 510 and the right side is a bar chart: Cn counts hits along the row (read at
+each block's column 2) and from BAR_X + BAR_UNIT (540 + 30) counts down by one where x = 0 mod 30
+(c5 == 0 and xm == 0, gcd(5, 6) = 1), so each proper divisor lights 30 px; primes (Cn = 0, M = 0) get a
+gold 30-px stub. Digits: Dg column 0 = n mod 10 (steps at band-first rows), column 1 = tens (steps when
+the fresh ones digit W is 0), every column to the right copies WW so the row alternates ones/tens; the
+tens glyph starts at an odd x (515) and the ones glyph at an even one (520), so ONE shared 3x5 digit
+table (P: one runs_tree per glyph row, peeled across the 3 columns with the period-5 counter c5) serves
+both; the hundreds glyph at 510 is a fixed "1" from band 100 down. L classifies pixels (1 mark, 2 lit
+label, 3 bar, 4 stub; the tens glyph is dark below band 10 and the label dark above band 1); R G B
+colour by class, M and y (band 1 is neither prime nor composite): primes PRIME gold, composites grey,
+marks in a blue-to-teal gradient by sieve third, bars teal, background near-black. Channels: xm
+(x mod 6), ym (band row, (y - 4) mod 6), c5 (x mod 5), Act, Sv, M, Cn, Dg, P, L, R, G, B. Verified by
+art/experiments/verify_primes.py: reads the three digits, the label colour, the bar length and every
+sieve mark of all 170 bands against trial division (39 primes), 0 wrong; VLM: full render plus 4x crops
+of the sieve corner and of the labels/bars.
 
 ### equations — equations.tree (556 B), equations_crt.tree (625 B), equations_v2.tree (705 B), equations_v3.tree (652 B), equations_v4.tree (840 B)
 Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 1 --random_length` (v2) and
@@ -465,7 +506,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Thirteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Fourteen `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, jxl_rs_crt 459 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 

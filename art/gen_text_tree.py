@@ -1179,30 +1179,29 @@ HiddenChannel {len(names) - 3}
 # ---------------------------------------------------------------- pseudo-profound quotes (a madlibs grammar)
 # A wall of quotes such as "THE SILENT MIND DEVOURS EVERY TRUTH OF THE SOUL." Each 64-cell slot of a
 # line (slot counter channel Q) holds one quote. A regular grammar over word classes makes the
-# choices with the 5-bit value V, either at the last letter of a word (adjective or not after a
-# determiner; end or not after a noun, so the full stop follows the noun directly) or at the blank
-# cell after it, which holds a negative marker saying which class comes next. The state channel S
-# is QUOTE_POS * pos + word while spelling (advance = W + QUOTE_POS); the vocabulary is sorted by
-# length then class so the last-letter table is one entry per (length, move) range, and every word
-# list appears once. Near the slot end the choices are forced (quote_zones) so the quote closes
-# with ." in time. The token channel maps (pos, word) to a letter with one runs_tree per position.
-QUOTE_WORDS = {                          # class -> {word: weight}; words <= 7 letters (QUOTE_POS positions)
-    "DET": {"THE": 4, "EVERY": 1, "NO": 1, "EACH": 1},
-    "ADJ": {"SILENT": 1, "ETERNAL": 1, "HIDDEN": 1, "TRUE": 1, "SACRED": 1, "INNER": 1, "MORTAL": 1, "EMPTY": 1,
-            "HOLLOW": 1, "DIVINE": 1, "FRAGILE": 1, "BROKEN": 1, "SECRET": 1},
-    "NOUN": {"MIND": 1, "SOUL": 1, "TRUTH": 1, "TIME": 1, "VOID": 1, "DREAM": 1, "SELF": 1, "CHAOS": 1,
-             "ORDER": 1, "DEATH": 1, "SILENCE": 1, "DESIRE": 1, "FATE": 1, "LOVE": 1, "LIGHT": 1, "FEAR": 1,
-             "WISDOM": 1, "SPIRIT": 1, "NATURE": 1, "REASON": 1, "BEAUTY": 1, "SHADOW": 1},
-    "VERB": {"IS": 3, "CREATES": 1, "DENIES": 1, "DEVOURS": 1, "DEFINES": 1, "REVEALS": 1, "HAUNTS": 1, "MIRRORS": 1,
-             "BECOMES": 1, "FORGETS": 1, "SEEKS": 1, "FEARS": 1, "ESCAPES": 1, "BETRAYS": 1},
-    "PREP": {"OF": 3, "BEYOND": 1, "INSIDE": 1, "BEFORE": 1, "WITHOUT": 1, "WITHIN": 1, "BENEATH": 1},
+# choices with a 5-bit value R that S builds in its own column from Rule 30 (quote_cell), either
+# at the last letter of a word (adjective or not after a determiner; end or not after a noun, so
+# the full stop follows the noun directly) or at the blank cell after it, which holds a negative
+# marker saying which class comes next; a word pick is then a single leaf N + base (wrap_pick), so
+# the vocabulary index is class-major. The state channel S is QUOTE_POS * pos + word while spelling
+# (advance = W + QUOTE_POS); within a class the words are sorted by length so the last-letter table
+# is one case per (class, length). Near the slot end the choices are forced (quote_zones) so the
+# quote closes with ." in time. The token channel maps (pos, word) to a letter, one runs_tree per
+# position.
+QUOTE_WORDS = {                          # class -> words (<= 7 letters); classes in index order (VERB then PREP: one pick block)
+    "DET": ("THE", "EVERY", "NO"),
+    "ADJ": ("SILENT", "ETERNAL", "HIDDEN", "TRUE", "SACRED", "INNER", "MORTAL", "DIVINE", "SECRET"),
+    "NOUN": ("MIND", "SOUL", "TIME", "VOID", "SELF", "FATE", "LOVE", "FEAR", "TRUTH", "DREAM", "CHAOS", "ORDER",
+             "DEATH", "SILENCE", "DESIRE", "NATURE", "REASON"),
+    "VERB": ("IS", "CREATES", "DENIES", "DEVOURS", "DEFINES", "REVEALS", "HAUNTS", "MIRRORS", "BECOMES"),
+    "PREP": ("OF", "BEYOND", "INSIDE", "BEFORE"),
 }
-QUOTE_NEXT = {"VERB": 3, "PREP": 1}      # what follows a noun that does not end the quote (class weights)
-QUOTE_ADJ_V = 21                         # at a determiner's last letter, V > 21 puts an adjective next (10 of 32)
-QUOTE_END_V = 15                         # at a noun's last letter (past QUOTE_MIN_CELLS), V > 15 ends the quote
-QUOTE_SHORT_NOUNS = ("MIND", "SOUL", "TIME", "LOVE")   # 4-letter nouns forced near the slot end
+QUOTE_DET_WEIGHTS = {"THE": 20, "EVERY": 7, "NO": 5}   # of the 32 random values (the only chain pick)
+QUOTE_ADJ_V = 21                         # at a determiner's last letter, R > 21 puts an adjective next (10 of 32)
+QUOTE_END_V = 12                         # at a noun's last letter (past QUOTE_MIN_CELLS), R > 12 ends the quote (19 of 32)
+QUOTE_SHORT_LEN = 4                      # near the slot end the noun is picked among the 4-letter nouns
 QUOTE_MARKS = {"OPEN": '"', "DOT": ".", "CLOSE": '"'}  # one-letter words: opening quote, full stop, closing quote
-QUOTE_POS = 64                           # S = QUOTE_POS * position + word index (> number of words)
+QUOTE_POS = 48                           # S = QUOTE_POS * position + word index (> number of words; small keeps split values short)
 QUOTE_SLOT_CELLS, QUOTE_MARGIN = 64, 2   # cells per quote slot; trailing cells never written
 QUOTE_MIN_CELLS = 20                     # a quote never ends before this many cells of its slot
 QUOTE_SEED_ROWS = 60                     # blank rows under the seed row before the first line (Rule 30 echoes)
@@ -1213,17 +1212,34 @@ V_RANGE = 32                             # values of the 5-bit V
 
 def quote_vocab():
     """
-    Pure function. [(word, class)] sorted by length then class order (QUOTE_WORDS classes, then
-    OPEN DOT CLOSE), so every (length, class) group is one contiguous index range.
+    Pure function. [(word, class)] sorted by class (QUOTE_WORDS order, then OPEN DOT CLOSE), length
+    and spelling: each class is one index block (arithmetic picks) and each (class, length) group is
+    contiguous (the last-letter table).
 
     Examples:
         >>> quote_vocab()[:5]
-        [('"', 'OPEN'), ('.', 'DOT'), ('"', 'CLOSE'), ('NO', 'DET'), ('IS', 'VERB')]
+        [('NO', 'DET'), ('THE', 'DET'), ('EVERY', 'DET'), ('TRUE', 'ADJ'), ('INNER', 'ADJ')]
     """
     classes = list(QUOTE_WORDS) + list(QUOTE_MARKS)
     words = [(w, c) for c, ws in QUOTE_WORDS.items() for w in ws] + [(w, c) for c, w in QUOTE_MARKS.items()]
     assert len(words) < QUOTE_POS and all(len(w) <= 7 for w, _ in words)
-    return sorted(words, key=lambda wc: (len(wc[0]), classes.index(wc[1])))
+    return sorted(words, key=lambda wc: (classes.index(wc[1]), len(wc[0]), wc[0]))
+
+
+def wrap_pick(base, n):
+    """
+    Pure function. Leaf tree mapping the 5-bit random value N to base + (N mod n): the default leaf
+    N + base and one wrap leaf per further multiple of n below V_RANGE (so the first V_RANGE mod n
+    words of the block come up once more).
+
+    Examples:
+        >>> print(render(wrap_pick(10, 17)))
+        if N > 16
+          - N -7
+          - N 10
+    """
+    wraps = range(-(-V_RANGE // n) - 1, 0, -1)
+    return chain("N", [(k * n - 1, Leaf("N", base - k * n)) for k in wraps], Leaf("N", base))
 
 
 def quote_zones():
@@ -1241,7 +1257,7 @@ def quote_zones():
     """
     ending = 2                                            # ." after the last letter
     big = max(len(w) for c in ("ADJ", "NOUN", "VERB", "PREP") for w in QUOTE_WORDS[c])
-    det_max, short = max(len(w) for w in QUOTE_WORDS["DET"]), max(len(w) for w in QUOTE_SHORT_NOUNS)
+    det_max, short = max(len(w) for w in QUOTE_WORDS["DET"]), QUOTE_SHORT_LEN
     the_path = 1 + len("THE") + 1 + short + ending          # NEEDS_DET marker, THE, marker, short noun, ."
     return 1 + big + ending - 1, the_path + det_max - len("THE") - 1, 1 + big + 1 + short + ending, 1 + big + the_path
 
@@ -1283,57 +1299,76 @@ def slot_counter(slot_px):
     return If("x", 0, If("W", slot_px - 2, Set(0), Leaf("W", 1)), Set(0))
 
 
-def quote_state(prev_v, prev_q, prev_cc, decide_row, line_cells, first_line_y):
+def quote_cell(prev_a, prev_cc, decide_row, decide, line_start):
     """
-    Pure function. State channel S of the quotes piece (see the section comment). Slot starts
-    (Q == 0, including x == 0) write the opening quote; above `first_line_y` everything is END.
+    Pure function. The state channel's cell layout: column SAMPLE_X builds the 5-bit random value
+    R from Rule 30 on rows 0 .. decide_row - 1 (Set / N + 16, 8, 4, 2, 1), decides on `decide_row`
+    (where N is R) and copies N below; other columns copy W; the x == 0 column is `line_start`.
 
     Examples:
-        >>> render(quote_state("Prev", "Prev2", "Prev3", 11, 62, 52)).splitlines()[0]
+        >>> render(quote_cell("Prev", "Prev2", 5, Set(1), Set(0))).splitlines()[0]
+        'if x > 0'
+    """
+    bits = decide_row
+    rows = [(cc_ym_gt(SAMPLE_X, i - 1), If(prev_a, CA_THRESHOLD, Set(1 << (bits - 1)) if i == 0 else Leaf("N", 1 << (bits - 1 - i)),
+                                          Set(0) if i == 0 else Leaf("N", 0))) for i in range(bits)]
+    column = chain(prev_cc, [(cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0)), (cc_ym_gt(SAMPLE_X, decide_row - 1), decide)] + rows[::-1], Leaf("N", 0))
+    cell = chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), column)], Leaf("W", 0))
+    return If("x", 0, cell, line_start)
+
+
+def quote_state(prev_a, prev_q, prev_cc, decide_row, line_cells, first_line_y):
+    """
+    Pure function. State channel S of the quotes piece (see the section comment). Random choices
+    read N, the 5-bit value built in the cell's column (quote_cell). Slot starts (Q == 0, including
+    x == 0) write the opening quote; above `first_line_y` everything is END.
+
+    Examples:
+        >>> render(quote_state("Prev", "Prev2", "Prev3", 5, 62, 80)).splitlines()[0]
         'if x > 0'
     """
     vocab = quote_vocab()
     idx = {wc: i for i, wc in enumerate(vocab)}
+    base = {c: min(i for i, (w, cls) in enumerate(vocab) if cls == c) for c in QUOTE_WORDS}
+    count = {c: len(QUOTE_WORDS[c]) for c in QUOTE_WORDS}
     word = lambda w, c: Set(idx[(w, c)])
     marker = {name: QUOTE_END - 1 - k for k, name in enumerate(QUOTE_MARKERS)}
     zone_short, zone_the, zone_det, zone_end = quote_zones()
     left_le = lambda k, then, other: If(prev_q, CELL_W * (line_cells - k) - 1, then, other)   # cells left <= k
-    pick = lambda triples: v_pick(prev_v, [(wt, word(w, c)) for w, c, wt in triples])
-    class_pick = lambda c: pick([(w, c, wt) for w, wt in QUOTE_WORDS[c].items()])
     dot = word(QUOTE_MARKS["DOT"], "DOT")
+    det_pick = v_pick("N", [(QUOTE_DET_WEIGHTS[w], word(w, "DET")) for w in QUOTE_WORDS["DET"]])
+    short = sum(1 for w in QUOTE_WORDS["NOUN"] if len(w) == QUOTE_SHORT_LEN)   # the shortest nouns lead the block
 
-    after_noun = pick([(w, c, QUOTE_NEXT[c] * wt / sum(QUOTE_WORDS[c].values())) for c in QUOTE_NEXT for w, wt in QUOTE_WORDS[c].items()])
-    moves = {"NEEDS_DET": left_le(zone_the, word("THE", "DET"), class_pick("DET")),
-             "NEEDS_ADJ": class_pick("ADJ"),
-             "NEEDS_NOUN": left_le(zone_short, pick([(w, "NOUN", 1) for w in QUOTE_SHORT_NOUNS]), class_pick("NOUN")),
-             "AFTER_NOUN": after_noun}
+    moves = {"NEEDS_DET": left_le(zone_the, word("THE", "DET"), det_pick),
+             "NEEDS_ADJ": wrap_pick(base["ADJ"], count["ADJ"]),
+             "NEEDS_NOUN": left_le(zone_short, wrap_pick(base["NOUN"], short), wrap_pick(base["NOUN"], count["NOUN"])),
+             "AFTER_NOUN": wrap_pick(base["VERB"], count["VERB"] + count["PREP"])}
     needs = lambda name: Set(marker[name])
-    ends = {"OPEN": class_pick("DET"),
-            "DET": left_le(zone_det, needs("NEEDS_NOUN"), If(prev_v, QUOTE_ADJ_V, needs("NEEDS_ADJ"), needs("NEEDS_NOUN"))),
+    ends = {"OPEN": det_pick,
+            "DET": left_le(zone_det, needs("NEEDS_NOUN"), If("N", QUOTE_ADJ_V, needs("NEEDS_ADJ"), needs("NEEDS_NOUN"))),
             "ADJ": needs("NEEDS_NOUN"),
             "NOUN": If(prev_q, CELL_W * QUOTE_MIN_CELLS - 1,
-                       left_le(zone_end, dot, If(prev_v, QUOTE_END_V, dot, needs("AFTER_NOUN"))), needs("AFTER_NOUN")),
+                       left_le(zone_end, dot, If("N", QUOTE_END_V, dot, needs("AFTER_NOUN"))), needs("AFTER_NOUN")),
             "VERB": needs("NEEDS_DET"), "PREP": needs("NEEDS_DET"),
             "DOT": word(QUOTE_MARKS["CLOSE"], "CLOSE"), "CLOSE": Set(QUOTE_END)}
 
     cases = []                           # (lowest W of the range, move): last letters -> ends, longer words -> advance
-    lengths = [len(w) for w, _ in vocab]
-    for p in range(max(lengths)):
-        group = [i for i in range(len(vocab)) if lengths[i] == p + 1]
-        i = group[0] if group else None
-        while i is not None and i <= group[-1]:
-            j = i
-            while j <= group[-1] and ends[vocab[j][1]] is ends[vocab[i][1]]:
-                j += 1
-            cases.append((QUOTE_POS * p + i, ends[vocab[i][1]]))
-            i = j
-        if group and group[-1] + 1 < len(vocab):
-            cases.append((QUOTE_POS * p + group[-1] + 1, Leaf("W", QUOTE_POS)))
-    letters = chain("W", [(lb - 1, move) for lb, move in sorted(cases, key=lambda c: -c[0])], Set(QUOTE_END))
+    for cls in list(QUOTE_WORDS) + list(QUOTE_MARKS):
+        block = [i for i, (w, c) in enumerate(vocab) if c == cls]
+        for p in range(max(len(vocab[i][0]) for i in block)):
+            last = [i for i in block if len(vocab[i][0]) == p + 1]
+            longer = [i for i in block if len(vocab[i][0]) > p + 1]
+            if last:
+                cases.append((QUOTE_POS * p + last[0], ends[cls]))
+            if longer:
+                cases.append((QUOTE_POS * p + longer[0], Leaf("W", QUOTE_POS)))
+    cases.sort(key=lambda c: c[0])
+    merged = [case for k, case in enumerate(cases) if k == 0 or case[1] is not cases[k - 1][1]]   # adjacent equal moves
+    letters = chain("W", [(lb - 1, move) for lb, move in reversed(merged)], Set(QUOTE_END))
     markers = chain("W", [(QUOTE_END - 1, Set(QUOTE_END))] + [(marker[n] - 1, moves[n]) for n in QUOTE_MARKERS[:-1]], moves[QUOTE_MARKERS[-1]])
     open_quote = word(QUOTE_MARKS["OPEN"], "OPEN")
     decide = If("y", first_line_y - 1, If(prev_q, 0, If("W", QUOTE_END, letters, markers), open_quote), Set(QUOTE_END))
-    return cell_decision(prev_cc, decide_row, decide, If("y", first_line_y - 1, open_quote, Set(QUOTE_END)))
+    return quote_cell(prev_a, prev_cc, decide_row, decide, If("y", first_line_y - 1, open_quote, Set(QUOTE_END)))
 
 
 def quote_token(order, prev_s, prev_cc, decide_row):
@@ -1344,7 +1379,7 @@ def quote_token(order, prev_s, prev_cc, decide_row):
     (its S is that or END), so the first cell of a line is drawn.
 
     Examples:
-        >>> render(quote_token(sorted({ch for w, _ in quote_vocab() for ch in w}), "Prev", "Prev2", 11)).splitlines()[0]
+        >>> render(quote_token(sorted({ch for w, _ in quote_vocab() for ch in w}), "Prev", "Prev2", 5)).splitlines()[0]
         'if x > 0'
     """
     vocab = quote_vocab()
@@ -1364,26 +1399,23 @@ def build_quotes(canvas, name="quotes"):
     geometry: QUOTE_SLOT_CELLS-cell slots along each row, one quote per slot.
 
     Examples:
-        >>> build_quotes((2048, 1024))[1]
-        ['cc', 'A', 'V', 'Q', 'S', 'T', 'P', 'R', 'G', 'B']
+        >>> apply_geometry(1); names = build_quotes((2048, 1024))[1]; apply_geometry(4); names
+        ['cc', 'A', 'Q', 'S', 'T', 'P', 'R', 'G', 'B']
     """
-    bits = 5
-    decide_row = GLYPH_Y0 - 1
-    sample_y0 = decide_row - bits + 1
+    decide_row = GLYPH_Y0                          # rows 0 .. GLYPH_Y0 - 1 build the random value
     n_groups = -(-canvas[0] // GROUP) * -(-canvas[1] // GROUP)
     slot_px = QUOTE_SLOT_CELLS * CELL_W
-    assert GROUP % slot_px == 0 and sample_y0 >= 0
+    assert GROUP % slot_px == 0 and decide_row == 5
     line_cells = QUOTE_SLOT_CELLS - QUOTE_MARGIN
     first_line_y = Y_OFFSET + CELL_H * -(-QUOTE_SEED_ROWS // CELL_H)
     glyphs = sorted({ch for w, _ in quote_vocab() for ch in w})
     dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
     order = best_order(glyphs, dist)
 
-    names = ["cc", "A", "V", "Q", "S", "T", "P", "R", "G", "B"]
+    names = ["cc", "A", "Q", "S", "T", "P", "R", "G", "B"]
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {"cc": cell_counter(), "A": rule30(n_groups), "Q": slot_counter(slot_px)}
-    trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0)
-    trees["S"] = quote_state(prev("S", "V"), prev("S", "Q"), prev("S", "cc"), decide_row, line_cells, first_line_y)
+    trees["S"] = quote_state(prev("S", "A"), prev("S", "Q"), prev("S", "cc"), decide_row, line_cells, first_line_y)
     trees["T"] = quote_token(order, prev("T", "S"), prev("T", "cc"), decide_row)
     trees["P"] = pattern_channel(order, prev("P", "T"), prev("P", "cc"), flip=False)
     trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"), on=Set(QUOTE_COLOUR[0]))
@@ -1396,7 +1428,7 @@ def build_quotes(canvas, name="quotes"):
    a class marker on the blank after a word, {QUOTE_END} when done; the marker cell's successor picks the next
    word from V. Glyph order: {"".join(order)!r}
    Channels: {", ".join(f"c{i} {n}" for i, n in enumerate(names))}
-     cc cell counter; A Rule 30; V 5 random bits; Q slot pixel counter; S state; T glyph index;
+     cc cell counter; A Rule 30; Q slot pixel counter; S state (its column rows 0..4 hold the 5 random bits); T glyph index;
      P glyph-row pattern; R glyph pixels ({QUOTE_COLOUR[0]}); G and B are RCT 3 deltas for {QUOTE_COLOUR}.
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}

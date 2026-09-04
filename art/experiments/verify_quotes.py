@@ -17,7 +17,7 @@ spec.loader.exec_module(gen)
 gen.apply_geometry(1)
 GLYPHS = sorted({ch for w, _ in gen.quote_vocab() for ch in w})
 BY_BITS = {tuple(int(b) for row in gen.FONT[ch] for b in row): ch for ch in GLYPHS}
-CLASS_OF = {w: c for c, ws in gen.QUOTE_WORDS.items() for w in ws}
+CLASS_OF = {w: c for c, ws in gen.QUOTE_WORDS.items() for w in ws}   # words are tuples per class
 SENTENCE = re.compile(r'^"DET (ADJ )?NOUN( (VERB|PREP) DET (ADJ )?NOUN)*\."$')
 LIT = 60
 

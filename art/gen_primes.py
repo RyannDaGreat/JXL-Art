@@ -20,9 +20,13 @@ hit is n = 2d. Channel M accumulates "some counter is 0" left to right, so at th
 copies WW, so the row alternates ones/tens; the glyph starts at LABEL_X + 5 (odd: tens) and
 LABEL_X + 10 (even: ones) read the right digit from one shared pattern table (channel P, 3x5 digit
 font, one runs_tree per glyph row, peeled across the 3 columns with the period-5 counter c5). The
-hundreds glyph at LABEL_X is a "1" drawn once y passes band 100. Channel L classifies pixels (bar,
-label, mark); R G B colour them: primes gold, composites grey (and 1, which is neither), sieve marks
-in a blue-to-teal gradient by x, plus a prime bar at the right edge.
+hundreds glyph at LABEL_X is a "1" drawn once y passes band 100. Proper divisors stop at n / 2, so the
+sieve only needs blocks up to x ~ 510 and the right half shows a bar chart instead: channel Cn counts
+the hits along the row (one per block, read at the block's first mark column) and from BAR_X counts
+down once every BAR_UNIT px (where c5 and xm are both 0, i.e. x = 0 mod 30), so a bar of BAR_UNIT px
+per proper divisor is lit while Cn > 0; primes (Cn stays 0, M = 0) get a gold stub of one unit.
+Channel L classifies pixels (label, mark, bar, stub); R G B colour them: primes gold, composites grey
+(and 1, which is neither), sieve marks in a blue-to-teal gradient by x, bars teal.
 Verify with art/experiments/verify_primes.py (reads digits, colours, marks and the bar back).
 """
 import importlib.util
@@ -44,16 +48,18 @@ NUMBERS = (CANVAS[1] - Y0) // BAND       # 170
 R0 = Y0 + 2 * BAND - 1                   # Act = 1 iff y - x >= R0: block d activates at band d + 1
 INACTIVE = -2                            # counter value before activation (never 0)
 DIGIT_ROWS = 5
-LABEL_X, LABEL_PITCH = 1000, 5           # hundreds glyph column; tens at +5 (odd -> tens), ones at +10 (even -> ones)
-BAR_X = 1015                             # prime bar from here to the right edge
+LABEL_X, LABEL_PITCH = 510, 5            # hundreds glyph column (even, multiple of 5); tens at +5 (odd -> tens), ones at +10 (even -> ones)
+BAR_X, BAR_UNIT = 540, BAND * 5           # divisor-count bars: BAR_UNIT px per proper divisor; BAR_X is a multiple of BAR_UNIT
 MARK_ROWS = (1, 4)                       # rows of the band (inclusive) that show a hit square
 Y100 = Y0 + BAND * 99                    # first row of band 100
+Y10 = Y0 + BAND * 9                      # first row of band 10: the tens glyph is blank above it
 DIGITS = ["111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001",
           "111100111001111", "111100111101111", "111001001001001", "111101111101111", "111101111001111"]
 PRIME, COMPOSITE, ONE = (255, 205, 70), (96, 96, 112), (60, 60, 72)
 BACKGROUND = (7, 8, 14)
-MARK_GRADIENT = ((70, 105, 215), (55, 160, 215), (60, 205, 170))   # marks by x third
-LABEL_ORDER = ["xm", "ym", "c5", "Act", "Sv", "M", "Dg", "P", "L", "R", "G", "B"]
+MARK_GRADIENT = ((70, 105, 215), (55, 160, 215), (60, 205, 170))   # marks by third of the sieve width
+BAR = (40, 120, 130)
+CHANNELS = ["xm", "ym", "c5", "Act", "Sv", "M", "Cn", "Dg", "P", "L", "R", "G", "B"]
 
 
 def digit_rows(digit):
@@ -135,6 +141,22 @@ def composite_flag(prev_sv):
     return If("x", 0, If(prev_sv, 0, Leaf("W", 0), If(prev_sv, -1, Set(1), Leaf("W", 0))), Set(0))
 
 
+def divisor_count(prev_xm, prev_c5, prev_sv):
+    """
+    Pure function. Cn: number of hits so far along the row (one per block, read where xm == 2)
+    up to the label, then from BAR_X + BAR_UNIT down by one every BAR_UNIT px (x = 0 mod 30: c5 == xm
+    == 0), stopping at 0, so BAR_UNIT px are lit per divisor.
+
+    Examples:
+        >>> render(divisor_count("Prev6", "Prev4", "Prev2")).splitlines()[0]
+        'if x > 569'
+    """
+    hit = If(prev_sv, 0, Leaf("W", 0), If(prev_sv, -1, Leaf("W", 1), Leaf("W", 0)))
+    count = If("x", 0, If(prev_xm, 2, Leaf("W", 0), If(prev_xm, 1, hit, Leaf("W", 0))), Set(0))
+    tick = If(prev_xm, 0, Leaf("W", 0), If(prev_c5, 0, Leaf("W", 0), If("W", 0, Leaf("W", -1), Set(0))))
+    return If("x", BAR_X + BAR_UNIT - 1, tick, If("x", LABEL_X - 1, Leaf("W", 0), count))
+
+
 def digit_channel(prev_ym):
     """
     Pure function. Dg: column 0 = n mod 10 (steps at band-first rows), column 1 = tens digit
@@ -170,7 +192,7 @@ def pattern_channel(prev_dg, prev_c5, prev_ym):
 
     Examples:
         >>> render(pattern_channel("Prev", "Prev5", "Prev6")).splitlines()[0]
-        'if x > 999'
+        'if x > 509'
     """
     digits = glyph_table(prev_ym, lambda r: runs_tree([digit_rows(d)[r] for d in range(10)], Set, prev_dg))
     hundreds = If("y", Y100 - 1, glyph_table(prev_ym, lambda r: Set(digit_rows(1)[r])), Set(0))
@@ -180,18 +202,22 @@ def pattern_channel(prev_dg, prev_c5, prev_ym):
     return If("x", LABEL_X - 1, If("x", LABEL_X + 3 * LABEL_PITCH - 1, Set(0), label), Set(0))
 
 
-def lit_class(prev_xm, prev_ym, prev_c5, prev_sv, prev_p):
+def lit_class(prev_xm, prev_ym, prev_c5, prev_sv, prev_cn, prev_p):
     """
-    Pure function. L: 3 on prime-bar pixels, 2 on lit label pixels (the pattern bit of the glyph
-    column), 1 on sieve-mark pixels (counter 0, block columns 2.., MARK_ROWS), else 0.
+    Pure function. L: 4 on the prime stub (first bar unit, no divisors), 3 on bar pixels (Cn > 0),
+    2 on lit label pixels (the pattern bit of the glyph column; the tens glyph stays dark below
+    band 10 and nothing is lit above band 1), 1 on sieve-mark pixels (counter 0, block columns
+    2.., MARK_ROWS), else 0. Bars and stubs use MARK_ROWS too.
 
     Examples:
-        >>> render(lit_class("Prev8", "Prev7", "Prev6", "Prev4", "Prev")).splitlines()[0]
-        'if x > 999'
+        >>> render(lit_class("Prev9", "Prev8", "Prev7", "Prev5", "Prev3", "Prev")).splitlines()[0]
+        'if x > 509'
     """
     lit = lambda split: If(prev_p, split, Set(2), Set(0))
-    label = If(prev_c5, 1, lit(0), If(prev_c5, 0, lit(1), lit(3)))
-    bar = If(prev_ym, DIGIT_ROWS - 1, Set(0), Set(3))
+    glyph = If(prev_c5, 1, lit(0), If(prev_c5, 0, lit(1), lit(3)))
+    label = If("y", Y0 - 1, If("x", LABEL_X + 2 * LABEL_PITCH - 1, glyph, If("y", Y10 - 1, glyph, Set(0))), Set(0))
+    stub = If("x", BAR_X + BAR_UNIT - 1, Set(0), Set(4))
+    bar = If(prev_ym, MARK_ROWS[1], Set(0), If(prev_ym, MARK_ROWS[0] - 1, If(prev_cn, 0, Set(3), stub), Set(0)))
     hit = If(prev_sv, 0, Set(0), If(prev_sv, -1, If(prev_ym, MARK_ROWS[1], Set(0), If(prev_ym, MARK_ROWS[0] - 1, Set(1), Set(0))), Set(0)))
     mark = If(prev_xm, 1, hit, Set(0))
     return If("x", LABEL_X - 1, If("x", BAR_X - 1, bar, label), mark)
@@ -202,15 +228,15 @@ def colour_channel(k, prev_l, prev_m):
     Pure function. One of R G B (component k) from the lit class, the composite flag and the row.
 
     Examples:
-        >>> render(colour_channel(0, "Prev", "Prev4")).splitlines()[0]
-        'if Prev > 2'
+        >>> render(colour_channel(0, "Prev", "Prev5")).splitlines()[0]
+        'if Prev > 3'
     """
     not_one = lambda then: If("y", Y0 + BAND - 1, then, Set(ONE[k]))          # band 1 is neither
     label = not_one(If(prev_m, 0, Set(COMPOSITE[k]), Set(PRIME[k])))
-    bar = If("y", Y0 + BAND - 1, If(prev_m, 0, Set(BACKGROUND[k]), Set(PRIME[k])), Set(BACKGROUND[k]))
-    third = CANVAS[0] // 3
+    stub = If("y", Y0 + BAND - 1, If(prev_m, 0, Set(BACKGROUND[k]), Set(PRIME[k])), Set(BACKGROUND[k]))
+    third = LABEL_X // 3
     mark = chain("x", [(2 * third - 1, Set(MARK_GRADIENT[2][k])), (third - 1, Set(MARK_GRADIENT[1][k]))], Set(MARK_GRADIENT[0][k]))
-    return If(prev_l, 2, bar, If(prev_l, 1, label, If(prev_l, 0, mark, Set(BACKGROUND[k]))))
+    return chain(prev_l, [(3, stub), (2, Set(BAR[k])), (1, label), (0, mark)], Set(BACKGROUND[k]))
 
 
 def build():
@@ -222,25 +248,27 @@ def build():
         >>> names[-3:], src.splitlines()[0]
         (['R', 'G', 'B'], '/* primes.tree — GENERATED by art/gen_primes.py; edit the generator, not this file.')
     """
-    names = LABEL_ORDER
+    names = CHANNELS
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {"xm": column_counter(BAND), "ym": mod_counter(BAND, (-Y0) % BAND), "c5": column_counter(LABEL_PITCH),
              "Act": activation_wave()}
     trees["Sv"] = sieve_channel(prev("Sv", "xm"), prev("Sv", "ym"), prev("Sv", "Act"))
     trees["M"] = composite_flag(prev("M", "Sv"))
+    trees["Cn"] = divisor_count(prev("Cn", "xm"), prev("Cn", "c5"), prev("Cn", "Sv"))
     trees["Dg"] = digit_channel(prev("Dg", "ym"))
     trees["P"] = pattern_channel(prev("P", "Dg"), prev("P", "c5"), prev("P", "ym"))
-    trees["L"] = lit_class(prev("L", "xm"), prev("L", "ym"), prev("L", "c5"), prev("L", "Sv"), prev("L", "P"))
+    trees["L"] = lit_class(prev("L", "xm"), prev("L", "ym"), prev("L", "c5"), prev("L", "Sv"), prev("L", "Cn"), prev("L", "P"))
     for k, ch in enumerate("RGB"):
         trees[ch] = colour_channel(k, prev(ch, "L"), prev(ch, "M"))
     tree = simplify(dispatch([trees[n] for n in names]))
     header = f"""/* primes.tree — GENERATED by art/gen_primes.py; edit the generator, not this file.
    {CANVAS[0]}x{CANVAS[1]}: n = 1 .. {NUMBERS} down the image, one per {BAND} rows; a sieve of Eratosthenes on the left
    (divisor d = 2, 3, .. per {BAND}-px block: column 0 holds d, column 1 counts -n mod d, 0 = hit, activated by the
-   diagonal y - x >= {R0} so d = n never fires), labels at x = {LABEL_X} (gold = prime, grey = composite), prime bar at {BAR_X}.
+   diagonal y - x >= {R0} so d = n never fires), labels at x = {LABEL_X} (gold = prime, grey = composite), from {BAR_X} a bar
+   of {BAR_UNIT} px per proper divisor (gold stub = prime).
    Channels: {", ".join(f"c{i} {n}" for i, n in enumerate(names))}
-     xm x mod {BAND}; ym band row; c5 x mod {LABEL_PITCH}; Act wave; Sv sieve; M composite flag; Dg digits (ones, tens alternating);
-     P digit row pattern; L lit class (1 mark, 2 label, 3 bar); R G B colours.
+     xm x mod {BAND}; ym band row; c5 x mod {LABEL_PITCH}; Act wave; Sv sieve; M composite flag; Cn divisor count / bar countdown;
+     Dg digits (ones, tens alternating); P digit row pattern; L lit class (1 mark, 2 label, 3 bar, 4 stub); R G B colours.
    Nodes: {count_nodes(tree)} */
 Width {CANVAS[0]}
 Height {CANVAS[1]}
