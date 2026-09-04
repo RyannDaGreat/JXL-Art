@@ -38,8 +38,10 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
   coordinates `xm = x mod CELL`, `ym = y mod CELL` come from **counter channels**.
 - **Counter channel** — hidden channel whose value increments from its W (or N) neighbour and wraps,
   giving `x mod P` (or `y mod P`) without any modulo operator.
-- **Skewed rule / corner rule** — a 3-neighbour boolean rule `new = f(NW, N, W)`; all three are
-  available during raster decoding. Used for the chaotic CA that picks digits.
+- **Rule 30** — the elementary CA `new = NW xor (N or NE)` run on the row above; NE and NW are
+  recovered from the `N-NE` / `NW-N` properties. It is the randomness source of every piece.
+  (A "skewed" rule on `NW, N, W` was tried first and is never chaotic: information only flows
+  one way.)
 - **Group** — JPEG XL decodes the frame in independent square groups (`128 << GroupShift`, max
   1024). Inside a group, `x`, `y`, and neighbour lookups are **group-local**: a 2048-wide image is
   two independent 1024-wide worlds that only differ in `g`. Verified empirically (see Lessons).
