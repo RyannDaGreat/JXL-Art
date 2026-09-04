@@ -138,6 +138,9 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 
 > "plz make it 4k (i.e. more equations same relative size same filesize)"
 
+> "ok for the infiinity -letter one if you can get it to say jxl-rs and use rust-like colors you won the
+> jxl-rs logo contest retroactively xD"
+
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
 installs that leave no trace in the dump. Top level therefore holds `setup.sh` next to the manifest.
@@ -296,6 +299,22 @@ Same text and mask as v1 plus two hidden channels and a colour rule (all in art/
   (user: "not smooth and seems to have added a lot of bytes"; it cost ~130 B). Smooth vignettes
   are not available: brightness can only take a few discrete leaf values per region.
 
+### jxl_rs — jxl_rs.tree (394 B)
+Generate with `--mask lemniscate --logo`. The infinity of text_infinity, but every run of drawn
+cells (a row's stretch inside the mask, starting at its left edge) spells `LOGO_TEXT` = "JXL-RS "
+instead of random glyphs, in Rust colours: "JXL" in Ferris orange (247, 76, 0), "-RS" in the tan
+GitHub uses for Rust (222, 165, 132), on black. No Rule 30 channel: V is a per-run counter 1..7
+(`text_counter_channel`: the previous cell's value arrives as W through the xm == 0 copy column;
+a blank or group-edge W restarts at 1, so runs in the left lobe, the right lobe and after the
+crossing each begin with "J"); the same lemniscate gate blanks cells outside the mask. Glyph order
+" JXL-RS " (index = counter value, 0 never drawn). Colour: R is the lit brightness (247 or 222 by
+counter <= 3), G and B are RCT 3 deltas chosen by the same split; unlit pixels have R = 0 so the
+negative deltas clamp to black. Orientation 4 kept (harmless: the mask is symmetric).
+Known blemish: a run that crosses the group boundary (x = 1024, the centre of the X) restarts
+at "J" there because a cell cannot read the previous group ("JXL-JXL-RS", 8 of 287 runs); a blank at
+the boundary would cut a vertical slit through the crossing, and a globally aligned counter (period 8,
+seamless at 64 cells) would stop runs from starting with "J", so the seam was kept.
+
 ### equations — equations.tree (556 B), equations_crt.tree (625 B), equations_v2.tree (705 B), equations_v3.tree (652 B), equations_v4.tree (840 B)
 Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 1 --random_length` (v2) and
 `--equations --inline --width 1024 --name equations_v3` (v3) and
@@ -380,7 +399,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Ten `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Eleven `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, jxl_rs 394 B, equations 556 B, equations_crt 625 B, equations_v2 705 B, equations_v3 652 B (1024x1024), equations_v4 840 B (4096x2048) (4096x2048); six of them at 2048x1024, v4 at 4096x2048), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 

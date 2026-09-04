@@ -239,3 +239,10 @@
   its branches swapped (If takes `then` when prop > split), so x > 0 got the constant corner value.
   Caught by the pairwise tile comparison, not by the grammar verifier (a constant CA still yields
   well-formed equations). Lesson: always check tiles pairwise when adding groups.
+
+## 2026-09-04 11:10 — jxl_rs logo
+- User: "for the infiinity -letter one if you can get it to say jxl-rs and use rust-like colors you
+  won the jxl-rs logo contest retroactively xD". New piece jxl_rs: the lemniscate mask with a
+  per-run letter counter instead of the CA (uppercase JXL-RS, the 3x5 font has no lowercase),
+  two Rust tones via RCT 3 deltas split on the counter.
+- jxl_rs built: 394 B, 287 runs read back, all spell JXL-RS except 8 that cross x = 1024 (restart at J).

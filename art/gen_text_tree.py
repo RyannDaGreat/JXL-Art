@@ -56,7 +56,7 @@ FONT = {  # 3x5 glyphs, 5 rows of 3 bits
     "?": ["110", "001", "010", "000", "010"], ".": ["000", "000", "000", "000", "010"],
     ",": ["000", "000", "000", "010", "100"], "{": ["011", "010", "110", "010", "011"],
     "}": ["110", "010", "011", "010", "110"], "(": ["010", "100", "100", "100", "010"],
-    ")": ["010", "001", "001", "001", "010"], "+": ["000", "010", "111", "010", "000"],
+    ")": ["010", "001", "001", "001", "010"], "+": ["000", "010", "111", "010", "000"], " ": ["000"] * 5,
     "-": ["000", "000", "111", "000", "000"], "·": ["000", "000", "010", "000", "000"],
     "/": ["001", "001", "010", "100", "100"], "=": ["000", "111", "000", "111", "000"],
     "^": ["010", "101", "000", "000", "000"], "3": ["111", "001", "011", "001", "111"],
@@ -76,6 +76,9 @@ WEYL_MOD, WEYL_STEPS = 1024, (633, 411)   # seed sequences v = (v + step) mod 10
 GROUP, FIRST_GROUP = 1024, 21          # JPEG XL group width and the id of the first group (ids follow in raster order)
 SEED_SHIFT = 37                        # with > 2 groups, group k starts its seed row 37 * k values along the Weyl sequence (odd: never a whole cell)
 WHITE = 255
+LOGO_TEXT = "JXL-RS "                  # jxl_rs: every run of drawn cells spells this from its left edge
+LOGO_TONE_SPLIT = 3                    # jxl_rs: counter values 1..3 (JXL) in RUST_ORANGE, the rest in RUST_TAN
+RUST_ORANGE, RUST_TAN = (247, 76, 0), (222, 165, 132)   # Ferris orange; GitHub's Rust language colour
 OPTIMIZER_RESTARTS = 40
 
 # ---------------------------------------------------------------- tree DSL (pure functions)
@@ -346,6 +349,24 @@ def value_channel(bits, prev_ca, prev_cc, sample_y0, gate=None):
     return chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), in_sample_column)], Set(BLANK))
 
 
+def text_counter_channel(period, prev_cc, decide_row, gate):
+    """
+    Pure function. Value channel V that counts 1 .. period along each run of drawn cells, so a
+    run spells a fixed word: the previous cell's value arrives as W through the xm == 0 copy
+    column, and a blank (negative) or group-edge (0) W restarts at 1. `gate(update)` blanks
+    cells outside the mask. Decided at (SAMPLE_X, decide_row), copied right and down.
+
+    Examples:
+        >>> render(text_counter_channel(7, "Prev", 11, lambda update: update)).splitlines()[0]
+        'if Prev > 63'
+    """
+    step = If("W", period - 1, Set(1), If("W", 0, Leaf("W", 1), Set(1)))
+    in_column = If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0),
+                   If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row - 1), gate(step), Leaf("N", 0)))
+    in_column = If("y", Y_OFFSET + BLANK_BANDS * CELL_H - 1, in_column, Set(BLANK))
+    return chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), in_column)], Leaf("W", 0))
+
+
 # ---------------------------------------------------------------- glyph lookup
 
 
@@ -502,16 +523,17 @@ def tall_pattern_channel(order, prev_token, prev_cc, prev_rt):
     return peel_across(If(prev_token, -1, If(prev_rt, 0, decide, draw), Set(0)), prev_cc)
 
 
-def colour_channel(prev_pattern, prev_cc):
+def colour_channel(prev_pattern, prev_cc, on=None):
     """
-    Pure function. R channel: glyph column c is lit when the (already shifted) pattern exceeds
-    3, 1, 0; outside the glyph columns the pixel is black.
+    Pure function. R channel: glyph column c is lit (value `on`, default WHITE) when the (already
+    shifted) pattern exceeds 3, 1, 0; outside the glyph columns the pixel is black.
 
     Examples:
         >>> render(colour_channel("Prev", "Prev2")).splitlines()[0]
         'if Prev2 > 447'
     """
-    lit = lambda split: If(prev_pattern, split, Set(WHITE), Set(0))
+    on = Set(WHITE) if on is None else on
+    lit = lambda split: If(prev_pattern, split, on, Set(0))
     x0, x1, x2, x3 = (GLYPH_X0 + c * PIXEL for c in range(4))
     return chain(prev_cc, [(cc_xm_gt(x3 - 1), Set(0)), (cc_xm_gt(x2 - 1), lit(0)), (cc_xm_gt(x1 - 1), lit(1)),
                            (cc_xm_gt(x0 - 1), lit(3))], Set(0))
@@ -1080,10 +1102,12 @@ HiddenChannel {len(names) - 3}
 # ---------------------------------------------------------------- assembling a piece
 
 
-def build_piece(charset, mask, canvas, crt=False):
+def build_piece(charset, mask, canvas, crt=False, text=None, name=None):
     """
     Pure function. (tree source text, channel names, character order) for a text piece.
-    crt=True adds scanlines, a phosphor trail glow and green-amber colour.
+    crt=True adds scanlines, a phosphor trail glow and green-amber colour. `text` replaces the
+    Rule 30 glyph choice by a per-run counter so every run of drawn cells spells it, coloured in
+    the two Rust tones (the jxl_rs logo).
 
     Examples:
         >>> src, names, order = build_piece(CHARSET_16, None, (1024, 1024))
@@ -1093,27 +1117,41 @@ def build_piece(charset, mask, canvas, crt=False):
         ['cc', 'A', 'V', 'P', 'sl', 'C', 'R', 'G', 'B']
         >>> src.splitlines()[0]
         '/* text.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.'
+        >>> build_piece(None, "lemniscate", (2048, 1024), text=LOGO_TEXT)[1:]
+        (['S', 'L', 'cc', 'V', 'P', 'R', 'G', 'B'], [' ', 'J', 'X', 'L', '-', 'R', 'S', ' '])
     """
-    assert len(charset) & (len(charset) - 1) == 0 and " " not in charset, "power-of-two size, no blank"
+    assert text or (len(charset) & (len(charset) - 1) == 0 and " " not in charset), "power-of-two size, no blank"
     assert mask in (None, "lemniscate") and canvas[1] <= GROUP and canvas[0] <= 2 * GROUP
-    bits = len(charset).bit_length() - 1
-    sample_y0 = GLYPH_Y0 - bits
+    assert not (text and crt)
     two_groups = canvas[0] > GROUP
-    dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
-    order = best_order(charset, dist)
+    if text:
+        order = [" "] + list(text)           # index = counter value; 0 is never drawn
+    else:
+        bits = len(charset).bit_length() - 1
+        sample_y0 = GLYPH_Y0 - bits
+        dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
+        order = best_order(charset, dist)
 
-    names = (["S", "L"] if mask else []) + ["cc", "A", "V", "P"] + (["sl", "C"] if crt else []) + ["R", "G", "B"]
+    names = (["S", "L"] if mask else []) + ["cc"] + ([] if text else ["A"]) + ["V", "P"] + (["sl", "C"] if crt else []) + ["R", "G", "B"]
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {}
     if mask:
         trees["S"] = lemniscate_field(canvas)
         trees["L"] = xband_field(canvas)
     trees["cc"] = cell_counter()
-    trees["A"] = rule30(2 if two_groups else 1)
     gate = lemniscate_gate(canvas, prev("V", "S"), prev("V", "L")) if mask else None
-    trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
+    if text:
+        trees["V"] = text_counter_channel(len(text), prev("V", "cc"), GLYPH_Y0 - 1, gate or (lambda update: update))
+    else:
+        trees["A"] = rule30(2 if two_groups else 1)
+        trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
     trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"), early=1 if crt else 0)
-    if crt:
+    if text:
+        tone = lambda here, k: If(prev(here, "V"), LOGO_TONE_SPLIT, Set(RUST_TAN[k] - (RUST_TAN[0] if k else 0)),
+                                  Set(RUST_ORANGE[k] - (RUST_ORANGE[0] if k else 0)))
+        trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"), on=tone("R", 0))
+        trees["G"], trees["B"] = tone("G", 1), tone("B", 2)   # RCT 3 adds R; unlit pixels (R = 0) clamp to black
+    elif crt:
         trees["sl"] = scanline_counter()
         trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"))
         trees["R"] = brightness_channel(prev("R", "C"), prev("R", "sl"))
@@ -1123,14 +1161,16 @@ def build_piece(charset, mask, canvas, crt=False):
         trees["G"] = trees["B"] = Set(0)      # RCT 3 adds R to these channels: grey = white/black
 
     tree = simplify(dispatch([trees[n] for n in names]))
-    name = (f"text_{mask}" if mask else "text") + ("_crt" if crt else "")
+    name = name or (f"text_{mask}" if mask else "text") + ("_crt" if crt else "")
     header = f"""/* {name}.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.
-   {canvas[0]}x{canvas[1]} grid of pseudo-random characters (3x5 font, {len(charset)} glyphs) chosen by Rule 30.
-   Character order (CA value 0..{len(charset) - 1}): {"".join(order)!r}
+   {f"{canvas[0]}x{canvas[1]}: every run of drawn cells spells {text!r} (3x5 font) in Rust colours." if text else
+     f"{canvas[0]}x{canvas[1]} grid of pseudo-random characters (3x5 font, {len(charset)} glyphs) chosen by Rule 30."}
+   Character order ({"counter value" if text else "CA value"} 0..{len(order) - 1}): {"".join(order)!r}
    Channels: {", ".join(f"c{i} {n}" for i, n in enumerate(names))}
-     cc = {CELL_H}*xm + ym cell counter; A Rule 30 (on = {CA_ON}); V character value from A in column
-     xm == {SAMPLE_X}, rows ym {sample_y0}..{sample_y0 + bits - 1} (negative = blank cell); P glyph-row pattern (bit 2 =
-     left pixel), shifted per glyph column; R glyph pixels; G and B are 0 deltas (RCT 3 adds R).
+     cc = {CELL_H}*xm + ym cell counter; {f"V letter counter 1..{len(text)} per run of drawn cells" if text else
+     f"A Rule 30 (on = {CA_ON}); V character value from A in column xm == {SAMPLE_X}, rows ym {sample_y0}..{sample_y0 + bits - 1}"}
+     (negative = blank cell); P glyph-row pattern (bit 2 = left pixel), shifted per glyph column; R glyph
+     pixels; G and B are {"per-tone" if text else "0"} deltas (RCT 3 adds R).
      {f"S mask field ({mask}) and L crossing field: a cell is drawn when |L| <= w near the centre or |S| <= half-width elsewhere." if mask else ""}
      {"sl scanline counter; C glow class (3 lit, trail 2, 1); R brightness by class and scanline, G = R + 25, B = 0." if crt else ""}
    Nodes: {count_nodes(tree)} */
@@ -1144,7 +1184,7 @@ HiddenChannel {len(names) - 3}
 
 
 def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False, inline=False, gap=0, row_gap=0,
-             random_length=False, one_equals=False, tall_parens=False):
+             random_length=False, one_equals=False, tall_parens=False, logo=False):
     """
     Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree / equations.tree);
     prints node count. Default canvas: 1024x1024 without a mask, 2048x1024 with one or for equations.
@@ -1153,6 +1193,7 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         >>> # generate()                                                       -> text.tree
         >>> # generate(mask="lemniscate", name="text_infinity")  -> text_infinity.tree (2048x1024)
         >>> # generate(mask="lemniscate", crt=True, name="text_infinity_v2")   -> CRT look
+        >>> # generate(mask="lemniscate", logo=True)                            -> jxl_rs.tree (spells JXL-RS)
         >>> # generate(equations=True)                                         -> equations.tree
         >>> # generate(equations=True, inline=True, gap=12, row_gap=1, random_length=True)  -> equations_v2.tree (two per row)
         >>> # generate(equations=True, inline=True, width=1024, name="equations_v3")  -> one equation per line
@@ -1164,8 +1205,8 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt
         src, names, order = build_equations(canvas, crt, inline, gap, name, row_gap, random_length, one_equals, tall_parens)
         default_name = "equations" + ("_v2" if inline else "_crt" if crt else "")
     else:
-        src, names, order = build_piece(charset, mask, canvas, crt)
-        default_name = ("text_" + mask if mask else "text") + ("_crt" if crt else "")
+        default_name = "jxl_rs" if logo else ("text_" + mask if mask else "text") + ("_crt" if crt else "")
+        src, names, order = build_piece(charset, mask, canvas, crt, LOGO_TEXT if logo else None, name or default_name)
     out = TREE_DIR / f"{name or default_name}.tree"
     out.write_text(src)
     nodes = src.split("Nodes: ")[1].split(" ")[0]
