@@ -1,4 +1,4 @@
-"""Local search for the 15-letter set (plus blank) whose glyph-row patterns compress best."""
+"""Local search for the 16-letter set whose glyph-row patterns compress best (no blank glyph)."""
 import importlib.util
 from pathlib import Path
 
@@ -13,12 +13,12 @@ dist = lambda p, q: sum(a != b for a, b in zip(gen.glyph_row_patterns(gen.FONT[p
 
 
 def cost(letters):
-    """Query (RNG-seeded optimiser). Total pattern transitions for the best order of ' ' + letters."""
-    order = gen.best_order([" "] + list(letters), " ", dist, restarts=12)
+    """Query (RNG-seeded optimiser). Total pattern transitions for the best order of the letters."""
+    order = gen.best_order(letters, dist, restarts=12)
     return gen.path_cost(order, dist), "".join(order)
 
 
-current = list("ETAOINSRHDLUCMF")
+current = list("ETAOINSRHDLUCMFY")
 best_cost, best_order = cost(current)
 print("start", "".join(current), best_cost, best_order)
 improved = True

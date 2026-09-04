@@ -103,3 +103,18 @@
   emitting the font rows reversed in decode space (`decoded_glyph`).
 - MISTAKE: moving Y_OFFSET to 52 made the counter start negative and would not have skipped a
   band anyway (bands are periodic in the counter); a band can only be blanked explicitly.
+
+## 2026-09-04 02:20 — wide infinity, no blank glyph
+- User: "plz make it bigger and fit the aspect ratio. so, more letters and not ssquare" / "also
+  space should not be one of the chatacters".
+- Canvas 2048x1024 = two decoder groups. Seed row uses a different Weyl step per group (633 / 411)
+  because identical groups decode to identical halves; the mask field's flip position and base
+  value branch on g. Blank cells are now a negative V (pattern channel emits 0 for V <= -1); the
+  blank first band and the unused xm == 0 column hold -1.
+- Mask simplified to diamonds clipped by y thresholds (flat-topped hexagons); knee slopes and the
+  quadratic rings removed from the generator (kept in git history). Loop geometry as fractions
+  of the canvas: offset 0.23 W, r_in 0.146 W, r_out 0.264 W, clip 0.41 H.
+- 16-letter search without a blank: "ABDEFHIKNOPRTVXY", 20 row transitions (start set had 28).
+- Sizes: text 338 B (32 glyphs incl. "2"), text_infinity 315 B (+16 B over the 299 B square
+  version: 2 groups ~8 B, group branches, y clip). VLM check: both loops full of letters, upright,
+  no blanks inside the strokes, 64 px margin at the bottom from the flip.
