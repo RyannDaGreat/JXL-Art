@@ -118,3 +118,15 @@
 - Sizes: text 338 B (32 glyphs incl. "2"), text_infinity 315 B (+16 B over the 299 B square
   version: 2 groups ~8 B, group branches, y clip). VLM check: both loops full of letters, upright,
   no blanks inside the strokes, 64 px margin at the bottom from the flip.
+
+## 2026-09-04 03:00 — round loops, full glyph set
+- User: "the infinity no longer looks rounded it looks like the HSBC logo" / "also does it even use
+  all the letters and !.{} etc". The clipped-diamond mask really was a hexagon pair.
+- Mask replaced by elliptical rings: f = (|x-cx|-d)^2/192, g = (y-cy)^2/128 grown by chord slopes
+  over 192/128-px pieces aligned to the centres, so slopes are 1, 3, 5, 7 (small, repeated) and the
+  value is exact at breakpoints; sagitta over a 192-px chord at r = 520 is ~9 px (invisible at
+  cell resolution). Lesson: the polygon look came from the *geometry* (45 deg edges), not from
+  chord approximation — coarse chords of a true quadratic look round.
+- Font gained "," "{" "}"; CHARSET_32 = A-Z + "!?.,{}" (no digits now). Both pieces use it.
+- Sizes: text 346 B; text_infinity 440 B (32 glyphs) / 354 B (--charset16). VLM check: round
+  overlapping loops, braces and commas legible, no blank glyphs.

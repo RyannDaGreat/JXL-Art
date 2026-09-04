@@ -4,7 +4,7 @@ Generates the text pieces: a grid of pseudo-random characters from a tiny pixel 
 a Rule-30 cellular automaton, optionally masked to a shape (only whole characters are drawn).
 
     python3.10 art/gen_text_tree.py                                  # text.tree (32 glyphs, 1024x1024)
-    python3.10 art/gen_text_tree.py --charset16 --mask hexagons --name text_infinity   # 2048x1024
+    python3.10 art/gen_text_tree.py --mask ellipses --name text_infinity            # 2048x1024
 
 Trees are built from a tiny DSL (If / Leaf tuples rendered to jxl_from_tree syntax) so every
 repeated structure (counters, bit accumulation, run-length lookups) is one function.
@@ -52,8 +52,10 @@ FONT = {  # 3x5 glyphs, 5 rows of 3 bits
     "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"],
     "2": ["111", "001", "111", "100", "111"], "!": ["010", "010", "010", "000", "010"],
     "?": ["110", "001", "010", "000", "010"], ".": ["000", "000", "000", "000", "010"],
+    ",": ["000", "000", "000", "010", "100"], "{": ["011", "010", "110", "010", "011"],
+    "}": ["110", "010", "011", "010", "110"],
 }
-CHARSET_32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + "012!?."
+CHARSET_32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + "!?.,{}"
 CHARSET_16 = "ABDEFHIKNOPRTVXY"     # 16 letters chosen by local search (art/experiments/charset_search.py) for the fewest glyph-row changes
 GLYPH_ROWS, GLYPH_COLS, PIXEL = 5, 3, 4
 GLYPH_X0, GLYPH_Y0 = 2, 12
@@ -418,62 +420,94 @@ def colour_channel(prev_pattern, prev_cc):
 
 # ---------------------------------------------------------------- mask (whole cells only)
 # A cell is blank unless a field S is inside a band at the cell's sample point. Channels cannot
-# be added, so S must be separable: S = ||x - cx| - d| + |y - cy| - mid (Manhattan distance to
-# the nearer loop centre, centred on the band so membership is one |S| <= half-width test via
-# the PrevAbs property), built with +-1 steps whose sign flips at x = cx-d, cx, cx+d and y = cy.
-# Two diamond rings result; clipping |y - cy| <= clip with plain y thresholds flattens their
-# tops and bottoms into hexagons. Geometry is a fraction of the canvas.
-HEXAGONS = dict(offset=0.23, r_in=0.146, r_out=0.264, clip=0.41)   # x fractions of width, clip of height
+# be added, so S must be separable: S = f(x) + g(y) - mid with f = (|x - cx| - d)^2 / PIECE_X and
+# g = (y - cy)^2 / PIECE_Y (two elliptical rings, aspect sqrt(PIECE_Y / PIECE_X)); "mid" centres
+# the band so membership is one |S| <= half-width test via the PrevAbs property. Predictors are
+# linear, so f and g are grown by chord slopes over pieces of PIECE px aligned to the centres:
+# with scale = piece the slopes are the small odd integers 1, 3, 5, ... and the accumulated value
+# is exact at every breakpoint (the curve deviates from the ellipse by < 10 px between them).
+ELLIPSES = dict(offset=0.244, r_in=0.1416, r_out=0.254, piece_x=192, piece_y=128)   # radii as fractions of width
 
 
-def hexagon_geometry(canvas):
+def ellipse_geometry(canvas):
     """
-    Pure function. (cx, cy, d, r_in, r_out, clip) in pixels for a canvas.
+    Pure function. (cx, cy, d, r_in, r_out) in pixels for a canvas.
 
     Examples:
-        >>> hexagon_geometry((2048, 1024))
-        (1024, 512, 471, 299, 541, 420)
+        >>> ellipse_geometry((2048, 1024))
+        (1024, 512, 500, 290, 520)
     """
     w, h = canvas
-    return (w // 2, h // 2, round(HEXAGONS["offset"] * w), round(HEXAGONS["r_in"] * w),
-            round(HEXAGONS["r_out"] * w), round(HEXAGONS["clip"] * h))
+    return w // 2, h // 2, round(ELLIPSES["offset"] * w), round(ELLIPSES["r_in"] * w), round(ELLIPSES["r_out"] * w)
 
 
-def hexagon_field(canvas):
+def chord_pieces(profile, breakpoints, size):
     """
-    Pure function. Field channel S for the hexagon mask (see above); with two groups the loop
-    centre sits at local x = GROUP - d in the left group and x = d in the right group.
+    Pure function. (split, slope) per piece between consecutive breakpoints clipped to [0, size):
+    slope = rounded chord slope of `profile`; "prop > split" selects the piece.
 
     Examples:
-        >>> render(hexagon_field((1024, 1024))).splitlines()[0]
+        >>> chord_pieces(lambda t: t * t / 4, [-4, 0, 4, 8], 8)
+        [(-1, 1), (3, 3)]
+    """
+    edges = sorted({0, size} | {b for b in breakpoints if 0 < b < size})
+    return [(a - 1, round((profile(b) - profile(a)) / (b - a))) for a, b in zip(edges, edges[1:])]
+
+
+def piece_chain(prop, pred, pieces):
+    """
+    Pure function. `pred + slope` selected by prop from chord_pieces output.
+
+    Examples:
+        >>> print(render(piece_chain("x", "W", [(-1, 1), (3, 3)])))
+        if x > 3
+          - W 3
+          - W 1
+    """
+    return chain(prop, [(split, Leaf(pred, slope)) for split, slope in reversed(pieces[1:])], Leaf(pred, pieces[0][1]))
+
+
+def ellipse_field(canvas):
+    """
+    Pure function. Field channel S for the ellipse mask; with two groups each group holds one
+    loop (centre at local x = GROUP - d on the left, x = d on the right).
+
+    Examples:
+        >>> render(ellipse_field((1024, 1024))).splitlines()[0]
         'if x > 0'
     """
-    cx, cy, d, r_in, r_out, _ = hexagon_geometry(canvas)
-    mid = (r_in + r_out) // 2
-    two = canvas[0] > GROUP
-    step = lambda centre: If("x", centre - 1, Leaf("W", 1), Leaf("W", -1))
-    if two:
-        xs = per_group(True, step(GROUP - d), step(d))
-        base = per_group(True, Set(GROUP - d + cy - mid), Set(d + cy - mid))
+    cx, cy, d, r_in, r_out = ellipse_geometry(canvas)
+    px, py = ELLIPSES["piece_x"], ELLIPSES["piece_y"]
+    mid = (r_in ** 2 + r_out ** 2) // (2 * px)
+    g = lambda v: (v - cy) ** 2 / py
+    ys = piece_chain("y", "N", chord_pieces(g, [cy + k * py for k in range(-8, 9)], canvas[1]))
+
+    def loop(centre, size):        # one loop centred at `centre` in local coordinates
+        f = lambda t: (t - centre) ** 2 / px
+        xs = piece_chain("x", "W", chord_pieces(f, [centre + k * px for k in range(-8, 9)], size))
+        return xs, Set(round(f(0) + g(0)) - mid)
+
+    if canvas[0] > GROUP:
+        (xs_l, base_l), (xs_r, base_r) = loop(GROUP - d, GROUP), loop(d, canvas[0] - GROUP)
+        xs, base = per_group(True, xs_l, xs_r), per_group(True, base_l, base_r)
     else:
-        xs = chain("x", [(cx + d, Leaf("W", 1)), (cx, Leaf("W", -1)), (cx - d, Leaf("W", 1))], Leaf("W", -1))
-        base = Set(cx - d + cy - mid)
-    ys = If("y", cy, Leaf("N", 1), Leaf("N", -1))
+        f = lambda x: (abs(x - cx) - d) ** 2 / px
+        breaks = [cx] + [cx + s * d + k * px for s in (-1, 1) for k in range(-8, 9)]
+        xs, base = piece_chain("x", "W", chord_pieces(f, breaks, canvas[0])), Set(round(f(0) + g(0)) - mid)
     return If("x", 0, xs, If("y", 0, ys, base))
 
 
-def hexagon_gate(canvas, prev_field):
+def ellipse_gate(canvas, prev_field):
     """
-    Pure function. gate(update) for value_channel: BLANK unless |S| <= half-width and |y - cy| <= clip.
+    Pure function. gate(update) for value_channel: BLANK unless |S| <= half-width.
 
     Examples:
-        >>> render(hexagon_gate((2048, 1024), "Prev")(Set(1))).splitlines()[0]
-        'if y > 932'
+        >>> render(ellipse_gate((2048, 1024), "Prev")(Set(1))).splitlines()[0]
+        'if PrevAbs > 485'
     """
-    _, cy, _, r_in, r_out, clip = hexagon_geometry(canvas)
-    half_width = (r_out - r_in) // 2
-    return lambda update: If("y", cy + clip, Set(BLANK),
-                             If("y", cy - clip - 1, If(prev_field + "Abs", half_width, Set(BLANK), update), Set(BLANK)))
+    _, _, _, r_in, r_out = ellipse_geometry(canvas)
+    half_width = (r_out ** 2 - r_in ** 2) // (2 * ELLIPSES["piece_x"])
+    return lambda update: If(prev_field + "Abs", half_width, Set(BLANK), update)
 
 
 # ---------------------------------------------------------------- assembling a piece
@@ -491,7 +525,7 @@ def build_piece(charset, mask, canvas):
         '/* text.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.'
     """
     assert len(charset) & (len(charset) - 1) == 0 and " " not in charset, "power-of-two size, no blank"
-    assert mask in (None, "hexagons") and canvas[1] <= GROUP and canvas[0] <= 2 * GROUP
+    assert mask in (None, "ellipses") and canvas[1] <= GROUP and canvas[0] <= 2 * GROUP
     bits = len(charset).bit_length() - 1
     sample_y0 = GLYPH_Y0 - bits
     two_groups = canvas[0] > GROUP
@@ -502,10 +536,10 @@ def build_piece(charset, mask, canvas):
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {}
     if mask:
-        trees["S"] = hexagon_field(canvas)
+        trees["S"] = ellipse_field(canvas)
     trees["cc"] = cell_counter()
     trees["A"] = rule30(two_groups)
-    gate = hexagon_gate(canvas, prev("V", "S")) if mask else None
+    gate = ellipse_gate(canvas, prev("V", "S")) if mask else None
     trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
     trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"))
     trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
@@ -520,7 +554,7 @@ def build_piece(charset, mask, canvas):
      cc = {CELL_H}*xm + ym cell counter; A Rule 30 (on = {CA_ON}); V character value from A in column
      xm == {SAMPLE_X}, rows ym {sample_y0}..{sample_y0 + bits - 1} (negative = blank cell); P glyph-row pattern (bit 2 =
      left pixel), shifted per glyph column; R glyph pixels; G and B are 0 deltas (RCT 3 adds R).
-     {f"S mask field ({mask}); a cell is blank unless |S| <= half-width and |y - cy| <= clip at its sample point." if mask else ""}
+     {f"S mask field ({mask}); a cell is blank unless |S| <= half-width at its sample point." if mask else ""}
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}
 Height {canvas[1]}
@@ -538,7 +572,7 @@ def generate(charset16=False, mask=None, name=None, width=None, height=1024):
 
     Examples:
         >>> # generate()                                                       -> text.tree
-        >>> # generate(charset16=True, mask="hexagons", name="text_infinity")  -> text_infinity.tree
+        >>> # generate(mask="ellipses", name="text_infinity")  -> text_infinity.tree (2048x1024)
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
     canvas = (width or (2 * GROUP if mask else GROUP), height)
