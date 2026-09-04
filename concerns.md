@@ -151,3 +151,14 @@
   v-span at the reach so the two bands meet without a jog (matching the *hole* edge matters:
   at a smaller reach the hole has only just opened and the inner edges would not line up).
 - text_infinity 524 B (+53 B: one channel, per-group gate with the update subtree 4x).
+
+## 2026-09-04 05:30 — infinity v2: CRT look
+- User: "green-amber CRT-like scanlines in foreground and background, with a subtle glow on the
+  letters and a vignette for the monitor boundarie". v1 kept as is.
+- Glow as a causal phosphor trail (class = lit ? 3 : W - 1) plus a 1 px rim before each glyph
+  column, enabled by computing the pattern one pixel early and peeling on a column's last pixel
+  (lit there = "W > 2"). Verified numerically: 120, 215x4, 120, 60, 8 across a glyph row.
+- Tube: superellipse n = 4 with 256-px chords gave a straight chamfered corner; n = 3 with 128-px
+  chords looks rounded. Vignette as three brightness bands + black.
+- Colour via RCT 3 constants: G = R + 25, B = R - 255; outside the tube R = -25 so G = 0.
+- text_infinity_v2 733 B (v1 524 B): +3 channels (18 B) and ~145 nodes.

@@ -384,12 +384,12 @@ def best_order(items, dist, restarts=OPTIMIZER_RESTARTS, seed=0):
     return best
 
 
-def pattern_channel(order, prev_value, prev_cc):
+def pattern_channel(order, prev_value, prev_cc, early=0):
     """
     Pure function. Hidden channel P holding the current glyph row's 3-bit pattern: computed at
-    xm == GLYPH_X0 from the value per glyph row (0 in the cell's margin rows and for blank cells,
-    i.e. negative values), copied right with W; the consumed high bit is removed at the start of
-    glyph columns 1 and 2.
+    xm == GLYPH_X0 - early from the value per glyph row (0 in the cell's margin rows and for blank
+    cells, i.e. negative values), copied right with W; the consumed high bit is removed `early`
+    pixels before glyph columns 1 and 2 (early=1 is what the CRT glow class needs).
 
     Examples:
         >>> render(pattern_channel("AB", "Prev", "Prev2")).splitlines()[0]
@@ -397,12 +397,13 @@ def pattern_channel(order, prev_value, prev_cc):
     """
     patterns = {ch: glyph_row_patterns(decoded_glyph(ch)) for ch in order}
     per_row = [runs_tree([patterns[ch][r] for ch in order], Set) for r in range(GLYPH_ROWS)]
-    row_cases = [(cc_ym_gt(GLYPH_X0, GLYPH_Y0 + r * PIXEL - 1), per_row[r]) for r in range(GLYPH_ROWS - 1, -1, -1)]
+    start = GLYPH_X0 - early
+    row_cases = [(cc_ym_gt(start, GLYPH_Y0 + r * PIXEL - 1), per_row[r]) for r in range(GLYPH_ROWS - 1, -1, -1)]
     at_glyph_start = If(prev_value, -1, chain(prev_cc, row_cases, Set(0)), Set(0))
-    x1, x2 = GLYPH_X0 + PIXEL, GLYPH_X0 + 2 * PIXEL
+    x1, x2 = GLYPH_X0 + PIXEL - early, GLYPH_X0 + 2 * PIXEL - early
     across = chain(prev_cc, [(cc_xm_gt(x2), Leaf("W", 0)), (cc_xm_gt(x2 - 1), If("W", 1, Leaf("W", -2), Leaf("W", 0))),
                              (cc_xm_gt(x1), Leaf("W", 0)), (cc_xm_gt(x1 - 1), If("W", 3, Leaf("W", -4), Leaf("W", 0)))], Leaf("W", 0))
-    return chain(prev_cc, [(cc_xm_gt(GLYPH_X0), across), (cc_xm_gt(GLYPH_X0 - 1), at_glyph_start)], Leaf("N", 0))
+    return chain(prev_cc, [(cc_xm_gt(start), across), (cc_xm_gt(start - 1), at_glyph_start)], Leaf("N", 0))
 
 
 def colour_channel(prev_pattern, prev_cc):
@@ -588,17 +589,116 @@ def lemniscate_gate(canvas, prev_field, prev_xband):
     return gate
 
 
+# ---------------------------------------------------------------- CRT look (v2)
+# Scanlines: a period-SCAN row counter darkens every SCAN-th line of everything. Glow: class
+# channel C is 3 on lit glyph pixels and otherwise the left neighbour minus one, a phosphor
+# trail that fades to the right (2 px), plus a 1 px rim before each lit glyph column; a
+# symmetric halo would need the next cell's value or a second font lookup. Tube: a superellipse
+# field T = 4096 ((|u| / half W)^n + (|v| / half H)^n) grown by chord slopes; brightness is scaled
+# per "radius" band (CRT["vignette"]) and black beyond the last one (rounded monitor corners).
+# Colour: the R channel holds brightness; RCT 3 makes G = R + PHOSPHOR_G and B = R - 255 (= 0),
+# so bright pixels are amber-yellow and dim ones green; outside the tube R = -PHOSPHOR_G so G = 0.
+CRT = dict(scan=4, dark=0.55, levels=(8, 60, 120, 215), phosphor_g=25, tube_power=3, tube_pieces=(128, 128),
+           vignette=((0.78, 1.0), (0.92, 0.72), (1.06, 0.45)))   # (superellipse radius, brightness factor) bands; black beyond
+TUBE_UNIT = 4096
+
+
+def scanline_counter():
+    """
+    Pure function. Row counter y mod CRT["scan"]; value 0 marks a dark line.
+
+    Examples:
+        >>> render(scanline_counter()).splitlines()[0]
+        'if y > 0'
+    """
+    return If("y", 0, If("N", CRT["scan"] - 2, Set(0), Leaf("N", 1)), Set(0))
+
+
+def tube_field(canvas):
+    """
+    Pure function. Superellipse field T (see above) grown with chord slopes per decoder group.
+
+    Examples:
+        >>> render(tube_field((1024, 1024))).splitlines()[0]
+        'if x > 0'
+    """
+    w, h = canvas
+    px, py = CRT["tube_pieces"]
+    n = CRT["tube_power"]
+    f = lambda u: TUBE_UNIT * (abs(u) / (w / 2)) ** n
+    g = lambda v: TUBE_UNIT * (abs(v) / (h / 2)) ** n
+    cy = h // 2
+    ys = piece_chain("y", "N", chord_pieces(lambda y: g(y - cy), [cy + j * py for j in range(-8, 9)], h))
+
+    def half(centre, size):
+        fx = lambda x: f(x - centre)
+        return piece_chain("x", "W", chord_pieces(fx, [centre + j * px for j in range(-8, 9)], size)), Set(round(fx(0) + g(-cy)))
+
+    if w > GROUP:
+        (xs_l, base_l), (xs_r, base_r) = half(GROUP, GROUP), half(0, w - GROUP)
+        xs, base = per_group(True, xs_l, xs_r), per_group(True, base_l, base_r)
+    else:
+        xs, base = half(w // 2, w)
+    return If("x", 0, xs, If("y", 0, ys, base))
+
+
+def class_channel(prev_pattern, prev_cc):
+    """
+    Pure function. Glow class C: 3 on lit glyph pixels, W - 1 elsewhere (fading trail), 2 on the
+    pixel before a lit glyph column. Relies on pattern_channel computing the pattern one pixel
+    before the glyph and peeling a bit on the LAST pixel of each column (crt=True layout), so on
+    that pixel "lit" is W > 2 and the pattern's top bit already belongs to the next column.
+
+    Examples:
+        >>> render(class_channel("Prev", "Prev2")).splitlines()[0]
+        'if Prev2 > 447'
+    """
+    trail = If("W", 0, Leaf("W", -1), Set(0))
+    lit, rim = Set(3), Set(2)
+    x0 = GLYPH_X0
+    bit = [3, 1, 0]                       # "top bit set" threshold after 0, 1, 2 peels
+    cases = [(cc_xm_gt(x0 + 3 * PIXEL - 1), trail)]
+    for c in range(GLYPH_COLS - 1, -1, -1):
+        last = x0 + (c + 1) * PIXEL - 1
+        next_bit = If(prev_pattern, bit[c + 1], rim, trail) if c + 1 < GLYPH_COLS else trail
+        cases.append((cc_xm_gt(last - 1), If("W", 2, lit, next_bit)))
+        cases.append((cc_xm_gt(x0 + c * PIXEL - 1), If(prev_pattern, bit[c], lit, trail)))
+    cases.append((cc_xm_gt(x0 - 2), If(prev_pattern, 3, rim, trail)))
+    return chain(prev_cc, cases, trail)
+
+
+def brightness_channel(prev_class, prev_tube, prev_scan):
+    """
+    Pure function. R channel of the CRT look: brightness by glow class, dimmed on dark scanlines
+    and by the vignette band, -PHOSPHOR_G (black after RCT) outside the tube.
+
+    Examples:
+        >>> render(brightness_channel("Prev", "Prev2", "Prev3")).splitlines()[0]
+        'if Prev2 > 4878'
+    """
+    levels = CRT["levels"]
+    def table(factor):
+        per_class = [If(prev_scan, 0, Set(round(v * factor)), Set(round(v * factor * CRT["dark"]))) for v in levels]
+        return chain(prev_class, [(k - 1, per_class[k]) for k in range(len(levels) - 1, 0, -1)], per_class[0])
+    bands = [(round(TUBE_UNIT * radius ** CRT["tube_power"]), factor) for radius, factor in CRT["vignette"]]
+    outer_cases = [(bands[i - 1][0], table(bands[i][1])) for i in range(len(bands) - 1, 0, -1)]
+    return If(prev_tube, bands[-1][0], Set(-CRT["phosphor_g"]), chain(prev_tube, outer_cases, table(bands[0][1])))
+
+
 # ---------------------------------------------------------------- assembling a piece
 
 
-def build_piece(charset, mask, canvas):
+def build_piece(charset, mask, canvas, crt=False):
     """
     Pure function. (tree source text, channel names, character order) for a text piece.
+    crt=True adds scanlines, a phosphor trail glow, a tube vignette and green-amber colour.
 
     Examples:
         >>> src, names, order = build_piece(CHARSET_16, None, (1024, 1024))
         >>> names
         ['cc', 'A', 'V', 'P', 'R', 'G', 'B']
+        >>> build_piece(CHARSET_16, None, (1024, 1024), crt=True)[1]
+        ['cc', 'A', 'V', 'P', 'sl', 'T', 'C', 'R', 'G', 'B']
         >>> src.splitlines()[0]
         '/* text.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.'
     """
@@ -610,7 +710,7 @@ def build_piece(charset, mask, canvas):
     dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
     order = best_order(charset, dist)
 
-    names = (["S", "L"] if mask else []) + ["cc", "A", "V", "P", "R", "G", "B"]
+    names = (["S", "L"] if mask else []) + ["cc", "A", "V", "P"] + (["sl", "T", "C"] if crt else []) + ["R", "G", "B"]
     prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
     trees = {}
     if mask:
@@ -620,12 +720,19 @@ def build_piece(charset, mask, canvas):
     trees["A"] = rule30(two_groups)
     gate = lemniscate_gate(canvas, prev("V", "S"), prev("V", "L")) if mask else None
     trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0, gate)
-    trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"))
-    trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
-    trees["G"] = trees["B"] = Set(0)          # RCT 3 adds R to these channels: grey = white/black
+    trees["P"] = pattern_channel(order, prev("P", "V"), prev("P", "cc"), early=1 if crt else 0)
+    if crt:
+        trees["sl"] = scanline_counter()
+        trees["T"] = tube_field(canvas)
+        trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"))
+        trees["R"] = brightness_channel(prev("R", "C"), prev("R", "T"), prev("R", "sl"))
+        trees["G"], trees["B"] = Set(CRT["phosphor_g"]), Set(-WHITE)   # RCT 3: G = R + 40, B = 0
+    else:
+        trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
+        trees["G"] = trees["B"] = Set(0)      # RCT 3 adds R to these channels: grey = white/black
 
     tree = dispatch([trees[n] for n in names])
-    name = f"text_{mask}" if mask else "text"
+    name = (f"text_{mask}" if mask else "text") + ("_crt" if crt else "")
     header = f"""/* {name}.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.
    {canvas[0]}x{canvas[1]} grid of pseudo-random characters (3x5 font, {len(charset)} glyphs) chosen by Rule 30.
    Character order (CA value 0..{len(charset) - 1}): {"".join(order)!r}
@@ -634,6 +741,7 @@ def build_piece(charset, mask, canvas):
      xm == {SAMPLE_X}, rows ym {sample_y0}..{sample_y0 + bits - 1} (negative = blank cell); P glyph-row pattern (bit 2 =
      left pixel), shifted per glyph column; R glyph pixels; G and B are 0 deltas (RCT 3 adds R).
      {f"S mask field ({mask}) and L crossing field: a cell is drawn when |L| <= w near the centre or |S| <= half-width elsewhere." if mask else ""}
+     {"sl scanline counter; T tube (superellipse) field; C glow class (3 lit, trail 2, 1); R brightness, G = R + 40, B = 0." if crt else ""}
    Nodes: {count_nodes(tree)} */
 Width {canvas[0]}
 Height {canvas[1]}
@@ -644,18 +752,19 @@ HiddenChannel {len(names) - 3}
     return header + render(tree) + "\n", names, order
 
 
-def generate(charset16=False, mask=None, name=None, width=None, height=1024):
+def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False):
     """
-    Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>.tree); prints node count.
+    Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree); prints node count.
     Default canvas: 1024x1024 without a mask, 2048x1024 with one.
 
     Examples:
         >>> # generate()                                                       -> text.tree
         >>> # generate(mask="lemniscate", name="text_infinity")  -> text_infinity.tree (2048x1024)
+        >>> # generate(mask="lemniscate", crt=True, name="text_infinity_v2")   -> CRT look
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
     canvas = (width or (2 * GROUP if mask else GROUP), height)
-    src, names, order = build_piece(charset, mask, canvas)
+    src, names, order = build_piece(charset, mask, canvas, crt)
     out = TREE_DIR / f"{name or ('text_' + mask if mask else 'text')}.tree"
     out.write_text(src)
     nodes = src.split("Nodes: ")[1].split(" ")[0]
