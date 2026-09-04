@@ -21,7 +21,7 @@ left to right. This is what the JXL Art community does; the web tool is https://
 5. `equations` — lines of random well-formed equations with matched parentheses, function
    names written downward; `equations_crt` — the same with the CRT look; `equations_v2` —
    names inline (SIN COS TAN EXP), syntax-coloured by token kind, two 60-token equations per
-   row with a 4-cell gap and a blank row between lines; `equations_v3` — the same on a
+   row with a 12-cell gap and two blank rows between lines; `equations_v3` — the same on a
    1024x1024 single-group canvas, one 64-token equation per line.
 
 **Hard constraints:** file size <= 1024 bytes (`anything above a kilobyte is banned`), image
@@ -285,7 +285,7 @@ Same text and mask as v1 plus two hidden channels and a colour rule (all in art/
   are not available: brightness can only take a few discrete leaf values per region.
 
 ### equations — equations.tree (561 B), equations_crt.tree (630 B), equations_v2.tree (698 B), equations_v3.tree (658 B)
-Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 4 --row_gap 1` (v2) and
+Generate with `--equations`, `--equations --crt`, `--equations --inline --gap 12 --row_gap 2` (v2) and
 `--equations --inline --width 1024 --name equations_v3` (v3).
 A context-free grammar rendered as text. Matched parentheses of one kind are a one-counter
 language (Dyck-1), so no stack is needed: tokens are generated left to right, one per 16x32 cell,
@@ -307,14 +307,15 @@ choices use the 5-bit value V. The first band is blank (too close to the seed ro
   channel K = 0 unlit else 1 + kind of the glyph (parens, operators, variables, digits,
   functions; the glyph order keeps kinds contiguous so kind = thresholds on the token), and
   R G B are five-entry palette lookups (EQ_PALETTE), no RCT. `gap` cells at the end of each
-  group stay blank (v2: 60-token equations, 4-cell gap between the two per row); `row_gap`
+  group stay blank (v2: 52-token equations, 12-cell gap between the two per row); `row_gap`
   blank cell rows between lines are made by a row-type channel RT (period row_gap + 1) that
-  blanks the state on spacer rows (v2: 1, so 15 lines per group).
+  blanks the state on spacer rows (v2: 2, so 10 lines per group). Gap sizes change only
+  threshold constants, so the byte count is unchanged.
 - v3 (`equations_v3`, user: "one equation per line"): v2 on a 1024x1024 canvas. One decoder
   group means one line per cell row; a line cannot span two groups because groups decode
   independently and the depth counter cannot cross the boundary.
 Verification: `python3.10 art/experiments/verify_equations.py equations|equations_v2` reads the
-glyphs back from the PNG (max of R,G,B > 60 = lit) and checks every line: 20/20, 30/30, 30/30.
+glyphs back from the PNG (max of R,G,B > 60 = lit) and checks every line: 20/20, 20/20, 30/30.
 
 ### Decoder validity: no redundant splits
 libjxl validates trees on decode: a split on a property whose outcome is already fixed by an

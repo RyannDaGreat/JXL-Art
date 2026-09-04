@@ -210,3 +210,8 @@
 - User repeated "add some space between them in the dense version"; read as vertical too. Added
   `row_gap`: a row-type channel (period row_gap + 1) blanks the state on spacer rows. v2 now has a
   blank row between lines (15 per group) plus the 4-cell horizontal gap: 698 B. Verified 30/30.
+
+## 2026-09-04 09:25 — v2 still read as a wall of text
+- User: "this is a wall of text i cant see where one equation starts and another ends i want more
+  space between them". Rendered gap/row_gap variants (8/2, 12/2, 12/3; all 698 B since only
+  thresholds change) and chose 12/2: two clear columns, 10 lines per group. 12/3 looked empty.
