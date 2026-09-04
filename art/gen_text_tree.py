@@ -55,7 +55,11 @@ FONT = {  # 3x5 glyphs, 5 rows of 3 bits
     "2": ["111", "001", "111", "100", "111"], "!": ["010", "010", "010", "000", "010"],
     "?": ["110", "001", "010", "000", "010"], ".": ["000", "000", "000", "000", "010"],
     ",": ["000", "000", "000", "010", "100"], "{": ["011", "010", "110", "010", "011"],
-    "}": ["110", "010", "011", "010", "110"],
+    "}": ["110", "010", "011", "010", "110"], "(": ["010", "100", "100", "100", "010"],
+    ")": ["010", "001", "001", "001", "010"], "+": ["000", "010", "111", "010", "000"],
+    "-": ["000", "000", "111", "000", "000"], "*": ["101", "010", "111", "010", "101"],
+    "/": ["001", "001", "010", "100", "100"], "=": ["000", "111", "000", "111", "000"],
+    "^": ["010", "101", "000", "000", "000"], "3": ["111", "001", "011", "001", "111"],
 }
 CHARSET_32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + "!?.,{}"
 CHARSET_16 = "ABDEFHIKNOPRTVXY"     # 16 letters chosen by local search (art/experiments/charset_search.py) for the fewest glyph-row changes
@@ -155,9 +159,9 @@ def chain(prop, cases, default):
     return tree
 
 
-def runs_tree(values, leaf_of):
+def runs_tree(values, leaf_of, prop="Prev"):
     """
-    Pure function. Balanced tree over an index (property "Prev") selecting leaf_of(values[i]);
+    Pure function. Balanced tree over an index (property `prop`) selecting leaf_of(values[i]);
     one split per run boundary of equal consecutive values.
 
     Examples:
@@ -171,7 +175,7 @@ def runs_tree(values, leaf_of):
         if not boundaries:
             return leaf_of(values[lo])
         b = boundaries[len(boundaries) // 2]
-        return If("Prev", b, build(b + 1, hi), build(lo, b))
+        return If(prop, b, build(b + 1, hi), build(lo, b))
     return build(0, len(values) - 1)
 
 
@@ -323,15 +327,15 @@ def glyph_row_patterns(rows):
     return tuple(int(row, 2) for row in rows)
 
 
-def decoded_glyph(ch):
+def decoded_glyph(ch, flip=FLIP):
     """
-    Query (reads FLIP). Glyph rows in decode order: reversed when the image is displayed flipped.
+    Pure function. Glyph rows in decode order: reversed when the image is displayed flipped.
 
     Examples:
-        >>> decoded_glyph("L")[0] if FLIP else decoded_glyph("L")[-1]
-        '111'
+        >>> decoded_glyph("L", flip=True)[0], decoded_glyph("L", flip=False)[0]
+        ('111', '100')
     """
-    return FONT[ch][::-1] if FLIP else FONT[ch]
+    return FONT[ch][::-1] if flip else FONT[ch]
 
 
 def path_cost(order, dist):
@@ -384,7 +388,7 @@ def best_order(items, dist, restarts=OPTIMIZER_RESTARTS, seed=0):
     return best
 
 
-def pattern_channel(order, prev_value, prev_cc, early=0):
+def pattern_channel(order, prev_value, prev_cc, early=0, flip=FLIP):
     """
     Pure function. Hidden channel P holding the current glyph row's 3-bit pattern: computed at
     xm == GLYPH_X0 - early from the value per glyph row (0 in the cell's margin rows and for blank
@@ -395,7 +399,7 @@ def pattern_channel(order, prev_value, prev_cc, early=0):
         >>> render(pattern_channel("AB", "Prev", "Prev2")).splitlines()[0]
         'if Prev2 > 95'
     """
-    patterns = {ch: glyph_row_patterns(decoded_glyph(ch)) for ch in order}
+    patterns = {ch: glyph_row_patterns(decoded_glyph(ch, flip)) for ch in order}
     per_row = [runs_tree([patterns[ch][r] for ch in order], Set) for r in range(GLYPH_ROWS)]
     start = GLYPH_X0 - early
     row_cases = [(cc_ym_gt(start, GLYPH_Y0 + r * PIXEL - 1), per_row[r]) for r in range(GLYPH_ROWS - 1, -1, -1)]
@@ -649,6 +653,152 @@ def brightness_channel(prev_class, prev_scan):
     return chain(prev_class, [(k - 1, per_class[k]) for k in range(len(levels) - 1, 0, -1)], per_class[0])
 
 
+# ---------------------------------------------------------------- random equations (a CFG)
+# Tokens are generated left to right, one per cell, by a counter automaton: matched parentheses
+# only need the nesting depth (the Dyck-1 language), not a stack. State channel S holds
+# 8 * class + depth, classes OPEN 0, OP 1, FUNC 2, CLOSE 3, OPERAND 4, BLANK 5, so the token
+# class is a threshold band and transitions are `W + constant` (no per-depth duplication).
+# Grammar:  E -> operand | ( E ) | fn ( E ) | E op E ;  "(" needs depth < EQ_MAX_DEPTH, ")" needs
+# depth > 0, and the last cells of a line force closes so every line balances. Function names
+# are written downward: the first letter sits in the expression row and the token channel T in
+# the two hanging rows below copies the successor letter of the glyph above (SIN, COS, TAN).
+EQ_GLYPHS = "()+-*/=^YZ123SINCOTA"
+EQ_WORDS = ("SIN", "COS", "TAN")                 # first letters and middle letters must be unique
+EQ_MAX_DEPTH = 3
+EQ_ROWS = 3                                    # cell rows per expression: 1 expression + 2 hanging
+EQ_RT_INIT = 1                                 # row type before the first band: bands go 2, 0, 1, ... so the
+                                               # first expression is the second band and the last hanging rows fit
+OPEN, OP, FUNC, CLOSE, OPERAND, BLANK_CLASS = 0, 1, 2, 3, 4, 5
+EQ_INIT = 8 * OP                               # line start behaves like "after an operator"
+
+
+def eq_row_type(prev_cc):
+    """
+    Pure function. RT channel: 0 on expression rows, 1 and 2 on the hanging rows; advances at
+    the start of each cell band, copied right; starts at 0 so the first (partial) band is 1.
+
+    Examples:
+        >>> render(eq_row_type("Prev3")).splitlines()[0]
+        'if x > 0'
+    """
+    step = If("N", EQ_ROWS - 2, Set(0), Leaf("N", 1))
+    return If("x", 0, Leaf("W", 0), If("y", 0, If(prev_cc, 0, Leaf("N", 0), step), Set(EQ_RT_INIT)))
+
+
+def eq_state(prev_v, prev_cc, decide_row, line_cells):
+    """
+    Pure function. State channel S (see above), decided once per cell at xm == SAMPLE_X on
+    `decide_row`, copied right (W) and down (N); reset to EQ_INIT at x == 0 (each decoder group
+    is one line). Random choices use the 5-bit value V. The piece is not flipped: names hang down.
+
+    Examples:
+        >>> render(eq_state("Prev", "Prev2", 11, 64)).splitlines()[0]
+        'if x > 0'
+    """
+    cells_left_le = lambda k, then, other: If("x", CELL_W * (line_cells - k), then, other)
+
+    def expect_operand(base):           # W in [base, base + 8): depth = W - base
+        to_operand, to_open, to_func = Leaf("W", 8 * OPERAND - base), Leaf("W", 1 - base), Leaf("W", 8 * FUNC - base)
+        shallow = lambda then: If("W", base + EQ_MAX_DEPTH - 1, to_operand, then)
+        choice = If(prev_v, 23, shallow(to_open), If(prev_v, 19, shallow(to_func), to_operand))
+        return cells_left_le(EQ_MAX_DEPTH + 3, to_operand, choice)
+
+    def expect_operator(base):
+        to_close, to_op, to_blank = Leaf("W", 8 * CLOSE - 1 - base), Leaf("W", 8 * OP - base), Set(8 * BLANK_CLASS)
+        deep = lambda then, other: If("W", base, then, other)          # depth > 0
+        return cells_left_le(2, deep(to_close, to_blank),
+                             cells_left_le(EQ_MAX_DEPTH + 1, deep(to_close, to_op),
+                                           deep(If(prev_v, 21, to_close, to_op), to_op)))
+
+    decide = chain("W", [(8 * BLANK_CLASS - 1, Set(8 * BLANK_CLASS)), (8 * OPERAND - 1, expect_operator(8 * OPERAND)),
+                         (8 * CLOSE - 1, expect_operator(8 * CLOSE)), (8 * FUNC - 1, Leaf("W", 1 - 8 * FUNC)),
+                         (8 * OP - 1, expect_operand(8 * OP))], expect_operand(0))
+    sample = If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0),
+                If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row - 1), decide, Leaf("N", 0)))
+    cell = chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), sample)], Leaf("W", 0))
+    return If("x", 0, cell, Set(EQ_INIT))
+
+
+def eq_token(order, prev_s, prev_v, prev_rt, prev_cc, decide_row):
+    """
+    Pure function. Token channel T: the glyph index for the cell. Expression rows pick a glyph of
+    the state's class (random details from V); hanging rows copy the successor letter of the
+    glyph above (function names), else blank.
+
+    Examples:
+        >>> render(eq_token(list(EQ_GLYPHS), "Prev", "Prev2", "Prev3", "Prev4", 11)).splitlines()[0]
+        'if Prev4 > 63'
+    """
+    g = lambda ch: Set(order.index(ch))
+    pick = lambda cases, default: chain(prev_v, [(k, g(ch)) for k, ch in cases], g(default))
+    operators = pick([(17, "+"), (12, "-"), (7, "*"), (3, "/")], "^")
+    operator = If(prev_s, 8 * OP, operators, pick([(17, "+"), (12, "-"), (7, "*"), (5, "/")], "="))
+    expression = chain(prev_s, [(8 * BLANK_CLASS - 1, Set(BLANK)),
+                                (8 * OPERAND - 1, pick([(13, "Y"), (8, "Z"), (5, "1"), (2, "2")], "3")),
+                                (8 * CLOSE - 1, g(")")),
+                                (8 * FUNC - 1, pick([(21, EQ_WORDS[2][0]), (20, EQ_WORDS[1][0])], EQ_WORDS[0][0])),
+                                (8 * OP - 1, operator)], g("("))
+    successor = {}
+    for word in EQ_WORDS:
+        for a, b in zip(word, word[1:]):
+            assert successor.get(a, b) == b, "ambiguous letter successor"
+            successor[a] = b
+    hanging = runs_tree([order.index(successor[ch]) if ch in successor else BLANK for ch in order], Set, prop="N")
+    sample = If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row), Leaf("N", 0),
+                If(prev_cc, cc_ym_gt(SAMPLE_X, decide_row - 1), If(prev_rt, 0, hanging, expression), Leaf("N", 0)))
+    return chain(prev_cc, [(cc_xm_gt(SAMPLE_X), Leaf("W", 0)), (cc_xm_gt(SAMPLE_X - 1), sample)], Set(BLANK))
+
+
+def build_equations(canvas, crt=False):
+    """
+    Pure function. (tree source, channel names, glyph order) for the random-equations piece.
+
+    Examples:
+        >>> src, names, order = build_equations((2048, 1024))
+        >>> names
+        ['cc', 'A', 'V', 'RT', 'S', 'T', 'P', 'R', 'G', 'B']
+    """
+    bits = 5
+    sample_y0 = GLYPH_Y0 - bits
+    decide_row = sample_y0 + bits - 1
+    dist = lambda p, q: sum(a != b for a, b in zip(glyph_row_patterns(FONT[p]), glyph_row_patterns(FONT[q])))
+    order = best_order(EQ_GLYPHS, dist)
+    two_groups = canvas[0] > GROUP
+    line_cells = min(canvas[0], GROUP) // CELL_W
+
+    names = ["cc", "A", "V", "RT", "S", "T", "P"] + (["sl", "C"] if crt else []) + ["R", "G", "B"]
+    prev = lambda here, there: "Prev" + (str(names.index(here) - names.index(there)) if names.index(here) - names.index(there) > 1 else "")
+    trees = {"cc": cell_counter(), "A": rule30(two_groups)}
+    trees["V"] = value_channel(bits, prev("V", "A"), prev("V", "cc"), sample_y0)
+    trees["RT"] = eq_row_type(prev("RT", "cc"))
+    trees["S"] = eq_state(prev("S", "V"), prev("S", "cc"), decide_row, line_cells)
+    trees["T"] = eq_token(order, prev("T", "S"), prev("T", "V"), prev("T", "RT"), prev("T", "cc"), decide_row)
+    trees["P"] = pattern_channel(order, prev("P", "T"), prev("P", "cc"), early=1 if crt else 0, flip=False)
+    if crt:
+        trees["sl"] = scanline_counter()
+        trees["C"] = class_channel(prev("C", "P"), prev("C", "cc"))
+        trees["R"] = brightness_channel(prev("R", "C"), prev("R", "sl"))
+        trees["G"], trees["B"] = Set(CRT["phosphor_g"]), Set(-WHITE)
+    else:
+        trees["R"] = colour_channel(prev("R", "P"), prev("R", "cc"))
+        trees["G"] = trees["B"] = Set(0)
+    tree = dispatch([trees[n] for n in names])
+    name = "equations" + ("_crt" if crt else "")
+    header = f"""/* {name}.tree — GENERATED by art/gen_text_tree.py; edit the generator, not this file.
+   {canvas[0]}x{canvas[1]}: random well-formed equations (matched parentheses, max depth {EQ_MAX_DEPTH}) from a counter
+   automaton; one token per cell, function names SIN/COS/TAN written downward. Glyph order: {"".join(order)!r}
+   Channels: {", ".join(f"c{i} {n}" for i, n in enumerate(names))}
+     cc cell counter; A Rule 30; V 5 random bits; RT row type (0 expression, 1-2 hanging);
+     S = 8*class + depth (OPEN OP FUNC CLOSE OPERAND BLANK); T glyph index; P glyph-row pattern; R draws.
+   Nodes: {count_nodes(tree)} */
+Width {canvas[0]}
+Height {canvas[1]}
+RCT 3
+HiddenChannel {len(names) - 3}
+"""
+    return header + render(tree) + "\n", names, order
+
+
 # ---------------------------------------------------------------- assembling a piece
 
 
@@ -715,20 +865,26 @@ HiddenChannel {len(names) - 3}
     return header + render(tree) + "\n", names, order
 
 
-def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False):
+def generate(charset16=False, mask=None, name=None, width=None, height=1024, crt=False, equations=False):
     """
-    Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree); prints node count.
-    Default canvas: 1024x1024 without a mask, 2048x1024 with one.
+    Command. Writes art/trees/<name>.tree (default text.tree / text_<mask>[_crt].tree / equations.tree);
+    prints node count. Default canvas: 1024x1024 without a mask, 2048x1024 with one or for equations.
 
     Examples:
         >>> # generate()                                                       -> text.tree
         >>> # generate(mask="lemniscate", name="text_infinity")  -> text_infinity.tree (2048x1024)
         >>> # generate(mask="lemniscate", crt=True, name="text_infinity_v2")   -> CRT look
+        >>> # generate(equations=True)                                         -> equations.tree
     """
     charset = CHARSET_16 if charset16 else CHARSET_32
-    canvas = (width or (2 * GROUP if mask else GROUP), height)
-    src, names, order = build_piece(charset, mask, canvas, crt)
-    out = TREE_DIR / f"{name or ('text_' + mask if mask else 'text')}.tree"
+    canvas = (width or (2 * GROUP if (mask or equations) else GROUP), height)
+    if equations:
+        src, names, order = build_equations(canvas, crt)
+        default_name = "equations" + ("_crt" if crt else "")
+    else:
+        src, names, order = build_piece(charset, mask, canvas, crt)
+        default_name = ("text_" + mask if mask else "text") + ("_crt" if crt else "")
+    out = TREE_DIR / f"{name or default_name}.tree"
     out.write_text(src)
     nodes = src.split("Nodes: ")[1].split(" ")[0]
     print(f"{out.name}: {canvas[0]}x{canvas[1]}, {len(charset)} glyphs, {nodes} nodes, channels {names}, order {''.join(order)!r}")

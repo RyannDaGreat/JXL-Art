@@ -18,6 +18,8 @@ left to right. This is what the JXL Art community does; the web tool is https://
    again with the CA choosing the characters.
 4. `text_infinity` (v1) — the same text masked to an infinity symbol, whole characters only;
    `text_infinity_v2` — v1 with a green-amber CRT look (scanlines, phosphor glow).
+5. `equations` — lines of random well-formed equations with matched parentheses, function
+   names written downward; `equations_crt` — the same with the CRT look.
 
 **Hard constraints:** file size <= 1024 bytes (`anything above a kilobyte is banned`), image
 >= 1024x1024, the CA must drive the randomness, every result is visually verified by Claude
@@ -110,6 +112,10 @@ looking at the decoded PNG (the "VLM check"), no agents for the first pass.
 
 > "plz nix the crt boundary effects like the vignette its not smooth and seems to have added a lot
 > of bytes"
+
+> "is it possible to make a context-free grammar this way" ... "well, what we could do is each word
+> could be vertically rendered downward" ... "does that solve the problem" ... "i want a CFG cause i
+> wanna generate random equations" ... "with ( and )'s that match properly" ... "do it"
 
 Claude's reading: "ASCII texts ... randomly" = a grid of pseudo-random ASCII characters (letters and/or
 digits) rendered as pixel glyphs, analogous to the 1/0 grid. "WOM problems" = write-only-memory:
@@ -269,6 +275,23 @@ Same text and mask as v1 plus two hidden channels and a colour rule (all in art/
   (user: "not smooth and seems to have added a lot of bytes"; it cost ~130 B). Smooth vignettes
   are not available: brightness can only take a few discrete leaf values per region.
 
+### equations — art/trees/equations.tree (534 B) and equations_crt.tree (603 B), `--equations [--crt]`
+A context-free grammar rendered as text. Matched parentheses of one kind are a one-counter
+language (Dyck-1), so no stack is needed: tokens are generated left to right, one per 16x32 cell,
+by a counter automaton whose whole state is one channel value `S = 8*class + depth` (classes
+OPEN, OP, FUNC, CLOSE, OPERAND, BLANK; depth 0..3). The class is a threshold band and every
+transition is `W + constant`, so the decision tree is not duplicated per depth (~45 nodes).
+Grammar: `E -> operand | ( E ) | fn ( E ) | E op E`, operands Y Z 1 2 3, operators + - * / ^
+(= only at depth 0), fn SIN COS TAN. `(` requires depth < 3 and at least depth+3 cells left,
+`)` requires depth > 0, and the last cells of a line force closes (`x` thresholds, each decoder
+group is a 64-cell line), so every line balances. Random choices use the 5-bit value V.
+Channels: cc, A (Rule 30), V, RT (row type 0/1/2, cycling per cell band), S, T (glyph index:
+picks the concrete glyph of the class, or in hanging rows the successor letter of the glyph
+above: S->I->N, C->O->S, T->A->N), P, R (+ sl, C with --crt). Not flipped: names hang downward
+and the first expression row is band 1 (y = 52), 59 CA steps below the seed.
+Verification: `python3.10 art/experiments/verify_equations.py` reads the glyphs back from the
+PNG and checks every line (20/20 well formed).
+
 ### Byte-cost model (measured)
 Baseline ~25 B; **each hidden channel costs 6 B of header**; repetitive trees cost ~1.2 B/node,
 diverse ones ~2 B/node. Golfing = fewer channels, fewer *distinct* properties/split values/
@@ -284,7 +307,7 @@ offsets, then fewer nodes. Node removals inside an already-repetitive tree often
 
 ## Success criteria
 
-- Five `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B and text_infinity_v2 602 B at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
+- Seven `.jxl` files in `art/out/` (digits 177 B, flag 222 B, text 346 B, text_infinity 524 B, text_infinity_v2 602 B, equations 534 B, equations_crt 603 B; the last five at 2048x1024), each <= 1024 bytes, each >= 1024 px on the short side, each visually correct. (The user's 300 B target for the infinity text was met at 299 B in the square 16-letter hexagon version; the wide canvas, true lemniscate and full 32-glyph set they asked for afterwards cost ~170 B more; `--charset16` saves ~85 B.)
 - The random choices come from a CA inside the tree, not from a stored table.
 - Fresh session can rebuild everything with `./setup.sh && python3.10 art/build.py`.
 

@@ -169,3 +169,16 @@
 - Lesson: a vignette needs a smooth brightness ramp, but a tree can only emit a handful of
   discrete values per region (each level multiplies the leaf table), so it bands; and the
   superellipse field costs ~50 nodes of chord slopes + 6 B. Not worth it here.
+
+## 2026-09-04 06:40 — equations (a CFG)
+- User asked whether a context-free grammar is possible; then: random equations with matched
+  parentheses, function names written downward. Key realisation: Dyck-1 needs only a depth
+  counter, and encoding S = 8*class + depth with `W + constant` transitions keeps the automaton
+  at ~45 nodes. End-of-line forcing with x thresholds guarantees balance.
+- MISTAKE: the piece inherited the vertical flip, so names hung upward and the top line's
+  letters were cut; the row-type cycle also left the last hanging rows incomplete. Fixed with a
+  `flip` parameter on the pattern channel and EQ_RT_INIT = 1.
+- MISTAKE: a patch script matched the shared header block twice and aborted without writing;
+  rebuilt from the old generator before noticing. Unique anchors now.
+- Verified mechanically (art/experiments/verify_equations.py): all 20 lines well formed.
+- equations 534 B, equations_crt 603 B.
